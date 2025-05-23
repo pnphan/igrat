@@ -2,6 +2,48 @@
 
 This document provides comprehensive examples for using the IGRA toolkit to work with radiosonde data. The examples are organized by function and then by common use cases.
 
+## Project Description
+
+The IGRA Toolkit is a Python library designed to simplify working with the Integrated Global Radiosonde Archive (IGRA) data. It provides tools for:
+
+- Downloading and accessing IGRA station data
+- Processing and analyzing radiosonde observations
+- Visualizing atmospheric profiles and station locations
+- Interpolating data to standard pressure levels
+- Quality control and data validation
+
+The toolkit is particularly useful for:
+- Atmospheric research and analysis
+- Weather forecasting and analysis
+- Climate studies
+- Educational purposes
+- Meteorological applications
+
+## Quick Start
+
+Here's a minimal example to get you started:
+
+```python
+import igrat
+
+# Download and read data for a station
+station = "USM00072520"  # Albany, NY
+df = igrat.read_station_data(station, file_type='df')
+
+# Plot a temperature profile
+igrat.plot_profile(
+    df,
+    x_variable='temperature',
+    y_variable='pressure',
+    date='2020-01-01',
+    time='12:00:00'
+)
+
+# Get station locations
+stations = igrat.read_station_locations()
+igrat.plot_station_map()
+```
+
 ## Installation
 
 ### Requirements
@@ -54,6 +96,105 @@ Install optional dependencies with:
 ```bash
 pip install jupyter seaborn scipy
 ```
+
+## Data Format
+
+The IGRA Toolkit works with two main data formats:
+
+### DataFrame Format
+- Contains individual observations in rows
+- Columns include: date, time, pressure, height, temperature, etc.
+- Easy to use with pandas for data analysis
+- Suitable for time series analysis and basic statistics
+
+### NetCDF Format
+- Multi-dimensional array format
+- Organized by profiles and levels
+- Efficient for large datasets
+- Compatible with xarray for advanced analysis
+- Better for spatial and temporal analysis
+
+## Contributing
+
+We welcome contributions to the IGRA Toolkit! Here's how you can help:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Development Setup
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/igrat.git
+cd igrat
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+```
+
+### Code Style
+- Follow PEP 8 guidelines
+- Use type hints
+- Write docstrings for all functions
+- Include unit tests for new features
+
+## Troubleshooting
+
+Common issues and their solutions:
+
+### Data Download Issues
+- Check your internet connection
+- Verify the station ID exists
+- Ensure you have write permissions in the target directory
+
+### Memory Issues
+- Use NetCDF format for large datasets
+- Process data in chunks
+- Use appropriate interpolation methods
+
+### Plotting Issues
+- Update matplotlib and cartopy
+- Check data validity before plotting
+- Use appropriate figure sizes
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use this toolkit in your research, please cite:
+
+```
+@software{igrat_toolkit,
+  author = {Your Name},
+  title = {IGRA Toolkit},
+  year = {2024},
+  publisher = {GitHub},
+  url = {https://github.com/yourusername/igrat}
+}
+```
+
+## Acknowledgments
+
+- NOAA for providing the IGRA dataset
+- Contributors and users of the toolkit
+- Open source community for various dependencies
+
+## Contact
+
+- GitHub Issues: [Report bugs or request features](https://github.com/yourusername/igrat/issues)
+- Email: your.email@example.com
+- Documentation: [Full documentation](https://igrat.readthedocs.io/)
 
 ## Table of Contents
 1. [Basic Functions](#basic-functions)
