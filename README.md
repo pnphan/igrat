@@ -66,7 +66,7 @@ The following packages are required:
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/igrat.git
+git clone https://github.com/pnphan/igrat.git
 cd igrat
 ```
 
@@ -127,7 +127,7 @@ We welcome contributions to the IGRA Toolkit! Here's how you can help:
 ### Development Setup
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/igrat.git
+git clone https://github.com/pnphan/igrat.git
 cd igrat
 
 # Create and activate virtual environment
@@ -176,11 +176,11 @@ If you use this toolkit in your research, please cite:
 
 ```
 @software{igrat_toolkit,
-  author = {Your Name},
+  author = {Peter Phan},
   title = {IGRA Toolkit},
   year = {2024},
   publisher = {GitHub},
-  url = {https://github.com/yourusername/igrat}
+  url = {https://github.com/pnphan/igrat}
 }
 ```
 
@@ -192,8 +192,8 @@ If you use this toolkit in your research, please cite:
 
 ## Contact
 
-- GitHub Issues: [Report bugs or request features](https://github.com/yourusername/igrat/issues)
-- Email: your.email@example.com
+- GitHub Issues: [Report bugs or request features](https://github.com/pnphan/igrat/issues)
+- Email: tammy.phan@utoronto.ca
 - Documentation: [Full documentation](https://igrat.readthedocs.io/)
 
 ## Table of Contents
@@ -560,5 +560,3 @@ print("Data availability by year:")
 for year in sorted(availability.keys()):
     print(f"{year}: {len(availability[year])} months of data")
 ```
-
-These examples demonstrate the versatility of the IGRA toolkit for various atmospheric science applications. The library can be used for both simple data access and complex analysis tasks. 
