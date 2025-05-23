@@ -1,0 +1,8 @@
+include LICENSE
+include README.md
+include pyproject.toml
+include setup.py
+include setup.cfg
+recursive-include docs *
+recursive-include tests *
+recursive-include igrat * 
