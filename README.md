@@ -2,6 +2,59 @@
 
 This document provides comprehensive examples for using the IGRA toolkit to work with radiosonde data. The examples are organized by function and then by common use cases.
 
+## Installation
+
+### Requirements
+- Python 3.7 or higher
+- pip (Python package installer)
+
+### Dependencies
+The following packages are required:
+- pandas
+- numpy
+- xarray
+- netCDF4
+- requests
+- plotly
+- matplotlib
+- cartopy
+- mplcursors
+
+### Installation Steps
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/igrat.git
+cd igrat
+```
+
+2. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+```
+
+3. Install the package and its dependencies:
+```bash
+pip install -e .
+```
+
+Or install directly from PyPI:
+```bash
+pip install igrat
+```
+
+### Optional Dependencies
+For additional functionality, you may want to install:
+- jupyter (for interactive notebooks)
+- seaborn (for enhanced plotting)
+- scipy (for additional scientific computing functions)
+
+Install optional dependencies with:
+```bash
+pip install jupyter seaborn scipy
+```
+
 ## Table of Contents
 1. [Basic Functions](#basic-functions)
    - [Downloading Data](#downloading-data)
