@@ -2122,4 +2122,9 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         print(f"Error getting profile: {e}")
         return None
 
+data = open_data("USM00072520-main.csv")
+interpolated_data = interp_data_to_pressure_levels(data, variable="temperature")
+plot_profile(interpolated_data, x_variable='temperature', y_variable='pressure', date='2020-01-01', time='12:00:00')
+
+
 
