@@ -31,6 +31,7 @@ import cartopy.feature as cfeature
 import mplcursors
 from matplotlib.widgets import Button
 import json
+from scipy import interpolate
 
 def download_station_file(station_id: str, output_dir: Optional[str] = None) -> Optional[str]:
     """
@@ -1282,22 +1283,22 @@ def _filter_invalid_values(x: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np
     
     return x[mask], y[mask]
 
-def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset], 
-                             index_variable: str, 
-                             variable: str, 
-                             min_index: float,
-                             max_index: float,
-                             step_size: float,
-                             start_date: Optional[datetime.datetime] = None,
-                             end_date: Optional[datetime.datetime] = None,
-                             fill_value: Optional[float] = None
-                             ) -> Union[pd.DataFrame, xr.Dataset]:
-    """Interpolate station data onto a uniform grid.
+def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
+                        index_variable: str,
+                        variable: str,
+                        min_index: float,
+                        max_index: float,
+                        step_size: float,
+                        method: str = 'linear',
+                        start_date: Optional[datetime.datetime] = None,
+                        end_date: Optional[datetime.datetime] = None,
+                        fill_value: Optional[float] = None,
+                        **kwargs) -> Union[pd.DataFrame, xr.Dataset]:
+    """Interpolate station data onto a uniform grid using scipy's interpolation functions.
 
     This function creates a uniform grid of the index variable and interpolates
-    the specified variable onto that grid. It supports both DataFrame and NetCDF data formats.
-
-    One-dimensional linear interpolation is used.
+    the specified variable onto that grid using scipy's interpolation functions.
+    It supports both DataFrame and NetCDF data formats.
 
     Parameters
     ----------
@@ -1316,12 +1317,18 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
         Maximum value for the uniform grid
     step_size : float
         Step size between grid points
+    method : str, optional
+        Interpolation method to use. See scipy.interpolate.interp1d for available methods.
+        Default is 'linear'.
     start_date : Optional[datetime.datetime], optional
         Start date for filtering data, by default None
     end_date : Optional[datetime.datetime], optional
         End date for filtering data, by default None
     fill_value : Optional[float], optional
         Value to use for extrapolation, by default None
+    **kwargs : dict
+        Additional keyword arguments passed to scipy's interpolation functions.
+        See scipy.interpolate.interp1d documentation for details.
 
     Returns
     -------
@@ -1330,34 +1337,34 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
 
     Examples
     --------
-    >>> # Interpolate temperature data onto a uniform height grid
+    >>> # Basic linear interpolation
     >>> df = read_station_data("USM00072520", file_type='df')
-    >>> interpolated_df = interpolate_station_data(
+    >>> interpolated_df = interp_data_advanced(
     ...     df,
     ...     index_variable='height',
     ...     variable='temperature',
     ...     min_index=0,
     ...     max_index=10000,
-    ...     step_size=100,
-    ...     method='linear'
+    ...     step_size=100
     ... )
-    >>> print(interpolated_df['height'].unique())  # Will show uniform height levels
-    [0, 100, 200, ..., 10000]
 
-    >>> # Interpolate wind speed onto a uniform pressure grid
+    >>> # Cubic spline interpolation with custom parameters
     >>> ds = read_station_data("USM00072520", file_type='netcdf')
-    >>> interpolated_ds = interpolate_station_data(
+    >>> interpolated_ds = interp_data_advanced(
     ...     ds,
     ...     index_variable='pressure',
     ...     variable='wind_speed',
     ...     min_index=1000,
     ...     max_index=100,
     ...     step_size=10,
-    ...     method='cubic'
+    ...     method='cubic',
+    ...     bounds_error=False,
+    ...     fill_value=0
     ... )
-    >>> print(interpolated_ds['pressure'].values)  # Will show uniform pressure levels
-    [1000, 990, 980, ..., 100]
     """
+    from scipy import interpolate
+    import numpy as np
+
     # Filter by date range if specified
     if start_date is not None or end_date is not None:
         if isinstance(data, pd.DataFrame):
@@ -1394,8 +1401,14 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
             x, y = _filter_invalid_values(x, y)
             
             if len(x) > 1:  # Need at least 2 points for interpolation
-                # Interpolate onto the uniform grid
-                interpolated_values = np.interp(grid, x, y, left=fill_value, right=fill_value)
+                # Sort the data points
+                sort_idx = np.argsort(x)
+                x = x[sort_idx]
+                y = y[sort_idx]
+                
+                # Create interpolation function
+                f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
+                interpolated_values = f(grid)
                 
                 # Create a new DataFrame for this profile
                 profile_df = pd.DataFrame({
@@ -1450,8 +1463,14 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
             x, y = _filter_invalid_values(x, y)
             
             if len(x) > 1:  # Need at least 2 points for interpolation
-                # Interpolate onto the uniform grid
-                interpolated_values.append(np.interp(grid, x, y, left=fill_value, right=fill_value))
+                # Sort the data points
+                sort_idx = np.argsort(x)
+                x = x[sort_idx]
+                y = y[sort_idx]
+                
+                # Create interpolation function
+                f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
+                interpolated_values.append(f(grid))
             else:
                 interpolated_values.append(np.full_like(grid, np.nan))
         
@@ -1765,12 +1784,39 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
     except Exception as e:
         print(f"Error processing availability data: {e}")
         return None
+    
+def get_years(data: Union[pd.DataFrame, xr.Dataset]) -> List[int]:
+    """Get the years of the data."""
+    availability = get_availability(data)
+    return list(availability.keys())
+
+def get_months(data: Union[pd.DataFrame, xr.Dataset], year: int) -> List[int]:
+    """Get the months of the data for a specific year."""
+    availability = get_availability(data)
+    return list(availability[year].keys())
+
+def get_days(data: Union[pd.DataFrame, xr.Dataset], year: int, month: int) -> List[int]:
+    """Get the days of the data for a specific year and month."""
+    availability = get_availability(data)
+    return list(availability[year][month].keys())
+
+def get_times(data: Union[pd.DataFrame, xr.Dataset], year: int, month: int, day: int) -> List[str]:
+    """Get the times of the data for a specific year, month, and day."""
+    availability = get_availability(data)
+    return availability[year][month][day]
+
+def get_num_soundings(data: Union[pd.DataFrame, xr.Dataset]) -> int:
+    """Get the number of soundings for a specific year, month, and day."""
+    if isinstance(data, pd.DataFrame):
+        return len(data['num_profile'].unique())
+    else:
+        return len(data['num_profiles'])
 
 def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
                 x_variable: str,
                 y_variable: str,
-                date: str,  # Format: YYYY-MM-DD
-                time: str,  # Format: HH:MM:SS
+                date: Optional[str] = None,  # Format: YYYY-MM-DD
+                time: Optional[str] = None,  # Format: HH:MM:SS
                 figsize: Tuple[int, int] = (10, 8),
                 title: Optional[str] = None,
                 xlabel: Optional[str] = None,
@@ -1778,48 +1824,9 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
                 grid: bool = True,
                 show: bool = True) -> Optional[plt.Figure]:
     """Plot a vertical profile for a specific date and time.
-
-    Parameters
-    ----------
-    data : Union[pd.DataFrame, xr.Dataset]
-        Input data containing the profile
-    x_variable : str
-        Name of the variable to plot on x-axis
-    y_variable : str
-        Name of the variable to plot on y-axis (typically height or pressure)
-    date : str
-        Date of the profile to plot in YYYY-MM-DD format
-    time : str
-        Time of the profile to plot in HH:MM:SS format
-    figsize : Tuple[int, int], optional
-        Figure size in inches (width, height), by default (10, 8)
-    title : Optional[str], optional
-        Plot title, by default None
-    xlabel : Optional[str], optional
-        X-axis label, by default None
-    ylabel : Optional[str], optional
-        Y-axis label, by default None
-    grid : bool, optional
-        Whether to show grid lines, by default True
-    show : bool, optional
-        Whether to display the plot, by default True
-
-    Returns
-    -------
-    Optional[plt.Figure]
-        The matplotlib figure object if show=False, None otherwise
-
-    Examples
-    --------
-    >>> # Plot temperature profile for a specific date and time
-    >>> fig = plot_profile(
-    ...     data,
-    ...     x_variable='temperature',
-    ...     y_variable='height',
-    ...     date='2020-01-01',
-    ...     time='12:00:00',
-    ...     title='Temperature Profile'
-    ... )
+    
+    If date and time are not provided, the function will use the single unique date/time
+    if it exists in the data. Otherwise, an error will be raised.
     """
     # Define units for common variables
     units = {
@@ -1833,50 +1840,49 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         'gph': 'm'
     }
 
-    # Get availability data
-    availability = get_availability(data)
-    if availability is None:
-        print("Error: Could not determine data availability")
+    if data is None:
+        print("Error: No data provided")
         return None
 
-    # Parse input date and time
+    # Get unique dates and times from data
+    if isinstance(data, pd.DataFrame):
+        unique_dates = data['date'].unique()
+        unique_times = data['time'].unique()
+    else:  # xarray Dataset
+        unique_dates = pd.to_datetime([str(d) for d in data['date'].values]).unique()
+        unique_times = pd.to_datetime([str(t) for t in data['time'].values]).unique()
+
+    # If date/time not provided, check if there's a single unique combination
+    if date is None or time is None:
+        if len(unique_dates) == 1 and len(unique_times) == 1:
+            date = str(unique_dates[0])
+            time = str(unique_times[0])
+        else:
+            raise ValueError("Multiple dates/times found in data. Please specify date and time.")
+        
+    # Try to parse the date and time into datetime objects
     try:
-        year = int(date[:4])
-        month = int(date[5:7])
-        day = int(date[8:10])
-    except (ValueError, IndexError) as e:
+        target_datetime = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M:%S")
+        target_date = target_datetime.date()
+        target_time = target_datetime.time()
+    except ValueError as e:
         print(f"Error parsing date/time: {e}")
-        print("Date should be in YYYY-MM-DD format")
-        print("Time should be in HH:MM:SS format")
-        return None
-
-    # Check if the requested date/time exists in the data
-    if year not in availability:
-        print(f"No data available for year {year}")
-        print(f"Available years: {sorted(availability.keys())}")
-        return None
-
-    if month not in availability[year]:
-        print(f"No data available for {year}-{month:02d}")
-        print(f"Available months: {sorted(availability[year].keys())}")
-        return None
-
-    if day not in availability[year][month]:
-        print(f"No data available for {year}-{month:02d}-{day:02d}")
-        print(f"Available days: {sorted(availability[year][month].keys())}")
-        return None
-
-    if time not in availability[year][month][day]:
-        print(f"No data available for {year}-{month:02d}-{day:02d} {time}")
-        print(f"Available times: {sorted(availability[year][month][day])}")
         return None
 
     if isinstance(data, pd.DataFrame):
-        # Filter data for the specific date and time
+        # First try exact string match
         profile_data = data[
             (data['date'] == date) &
             (data['time'] == time)
         ]
+        
+        # If no match found, try datetime comparison
+        if len(profile_data) == 0:
+            # Since date and time are already datetime objects, compare directly
+            profile_data = data[
+                (data['date'] == target_date) &
+                (data['time'] == target_time)
+            ]
 
         if len(profile_data) == 0:
             print(f"No profile found for {date} {time}")
@@ -1920,52 +1926,57 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         if title:
             ax.set_title(title)
         else:
-            ax.set_title(f"{x_variable.capitalize()} vs {y_variable.capitalize()} Profile\n{date} {time}")
+            ax.set_title(f"{y_variable.capitalize()} vs {x_variable.capitalize()}\n{date} {time}")
+            
+        # Invert y-axis if y_variable is pressure
+        if y_variable == 'pressure':
+            ax.invert_yaxis()
             
         if grid:
             ax.grid(True)
             
-        # Invert y-axis if y_variable is pressure
-        if y_variable.lower() in ['pressure', 'p']:
-            ax.invert_yaxis()
-            
         if show:
             plt.show()
-            return None
-        else:
-            return fig
-
+            
+        return fig
+        
     elif isinstance(data, (xr.Dataset, nc.Dataset)):
-        # Convert date to YYYYMMDD format for xarray
-        date_int = int(date.replace('-', ''))
-        time_int = int(time[:2])
+        # First try exact string match
+        try:
+            profile_data = data.sel(date=date, time=time)
+        except Exception:
+            profile_data = None
+        
+        # If no match found, try datetime comparison
+        if profile_data is None or len(profile_data[x_variable]) == 0:
+            try:
+                dates = pd.to_datetime([str(d) for d in data['date'].values])
+                times = pd.to_datetime([str(t) for t in data['time'].values])
+                
+                target_idx = np.where((dates.dt.date == target_date) & 
+                                    (times.dt.time == target_time))[0]
+                
+                if len(target_idx) > 0:
+                    profile_data = data.isel(num_profiles=target_idx[0])
+            except Exception:
+                print(f"No profile found for {date} {time}")
+                return None
 
-        # Filter data for the specific date and time
-        profile_data = data.where(
-            (data['date'] == date_int) &
-            (data['time'] == time_int),
-            drop=True
-        )
-
-        if len(profile_data['num_profiles']) == 0:
+        if profile_data is None or len(profile_data[x_variable]) == 0:
             print(f"No profile found for {date} {time}")
             return None
 
-        # Handle height/gph synonym
-        x_name = 'gph' if x_variable == 'height' else x_variable
-        y_name = 'gph' if y_variable == 'height' else y_variable
-
         # Filter out invalid values (NaN, -9999, -8888)
         valid_mask = (
-            ~np.isnan(profile_data[x_name]) & 
-            ~np.isnan(profile_data[y_name]) &
-            (profile_data[x_name] != -9999) &
-            (profile_data[x_name] != -8888) &
-            (profile_data[y_name] != -9999) &
-            (profile_data[y_name] != -8888)
+            ~np.isnan(profile_data[x_variable]) & 
+            ~np.isnan(profile_data[y_variable]) &
+            (profile_data[x_variable] != -9999) &
+            (profile_data[x_variable] != -8888) &
+            (profile_data[y_variable] != -9999) &
+            (profile_data[y_variable] != -8888)
         )
-        x_data = profile_data[x_name].where(valid_mask, drop=True)
-        y_data = profile_data[y_name].where(valid_mask, drop=True)
+        x_data = profile_data[x_variable][valid_mask]
+        y_data = profile_data[y_variable][valid_mask]
 
         if len(x_data) == 0 or len(y_data) == 0:
             print(f"Error: No valid data points found for {x_variable} vs {y_variable}")
@@ -1993,30 +2004,29 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         if title:
             ax.set_title(title)
         else:
-            ax.set_title(f"{x_variable.capitalize()} vs {y_variable.capitalize()} Profile\n{date} {time}")
+            ax.set_title(f"{y_variable.capitalize()} vs {x_variable.capitalize()}\n{date} {time}")
+            
+        # Invert y-axis if y_variable is pressure
+        if y_variable == 'pressure':
+            ax.invert_yaxis()
             
         if grid:
             ax.grid(True)
             
-        # Invert y-axis if y_variable is pressure
-        if y_variable.lower() in ['pressure', 'p']:
-            ax.invert_yaxis()
-            
         if show:
             plt.show()
-            return None
-        else:
-            return fig
-
+            
+        return fig
+        
     else:
-        raise TypeError(f"Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
-    
+        print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
+        return None
+
 def get_profile(data: Union[pd.DataFrame, xr.Dataset],
                 date: str,
                 time: str) -> Optional[Union[pd.DataFrame, xr.Dataset]]:
-    """
-    Get a profile for a specific date and time.
-
+    """Get a profile for a specific date and time.
+    
     Parameters
     ----------
     data : Union[pd.DataFrame, xr.Dataset]
@@ -2025,106 +2035,76 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         Date in YYYY-MM-DD format
     time : str
         Time in HH:MM:SS format
-
+        
     Returns
     -------
     Optional[Union[pd.DataFrame, xr.Dataset]]
-        Data containing only the profile for the specified date and time.
-        Returns None if no profile is found.
-
-    Examples
-    --------
-    >>> # Get a profile from a DataFrame
-    >>> df = open_data("USM00072520-main.csv")
-    >>> profile = get_profile(df, '2020-01-01', '12:00:00')
-    >>> print(profile.head())
-
-    >>> # Get a profile from a Dataset
-    >>> ds = open_data("USM00072520-main.nc")
-    >>> profile = get_profile(ds, '2020-01-01', '12:00:00')
-    >>> print(profile)
+        The profile data if found, None otherwise
     """
+    if data is None:
+        print("Error: No data provided")
+        return None
+        
+    # Try to parse the date and time into datetime objects
     try:
-        # Get availability data
-        availability = get_availability(data)
-        if availability is None:
-            print("Error: Could not determine data availability")
-            return None
-
-        # Parse input date and time
-        try:
-            year = int(date[:4])
-            month = int(date[5:7])
-            day = int(date[8:10])
-        except (ValueError, IndexError) as e:
-            print(f"Error parsing date/time: {e}")
-            print("Date should be in YYYY-MM-DD format")
-            print("Time should be in HH:MM:SS format")
-            return None
-
-        # Check if the requested date/time exists in the data
-        if year not in availability:
-            print(f"No data available for year {year}")
-            print(f"Available years: {sorted(availability.keys())}")
-            return None
-
-        if month not in availability[year]:
-            print(f"No data available for {year}-{int(month):02d}")
-            print(f"Available months: {sorted(availability[year].keys())}")
-            return None
-
-        if day not in availability[year][month]:
-            print(f"No data available for {year}-{int(month):02d}-{int(day):02d}")
-            print(f"Available days: {sorted(availability[year][month].keys())}")
-            return None
-
-        if time not in availability[year][month][day]:
-            print(f"No data available for {year}-{int(month):02d}-{int(day):02d} {time}")
-            print(f"Available times: {sorted(availability[year][month][day])}")
-            return None
-
-        # If we get here, we know the date/time exists in the data
-        if isinstance(data, pd.DataFrame):
-            # Filter data for the specific date and time
-            profile_data = data[
-                (data['date'] == date) &
-                (data['time'] == time)
-            ]
-
-            if len(profile_data) == 0:
-                print(f"No profile found for {date} {time}")
-                return None
-
-            return profile_data
-
-        elif isinstance(data, (xr.Dataset, nc.Dataset)):
-            # Convert date to YYYYMMDD format for xarray
-            date_int = int(date.replace('-', ''))
-            time_int = int(time[:2])
-
-            # Filter data for the specific date and time
-            profile_data = data.where(
-                (data['date'] == date_int) &
-                (data['time'] == time_int),
-                drop=True
-            )
-
-            if len(profile_data['num_profiles']) == 0:
-                print(f"No profile found for {date} {time}")
-                return None
-
-            return profile_data
-
-        else:
-            raise TypeError(f"Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
-
-    except Exception as e:
-        print(f"Error getting profile: {e}")
+        target_datetime = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M:%S")
+        target_date = target_datetime.date()
+        target_time = target_datetime.time()
+    except ValueError as e:
+        print(f"Error parsing date/time: {e}")
         return None
 
-data = open_data("USM00072520-main.csv")
-interpolated_data = interp_data_to_pressure_levels(data, variable="temperature")
-plot_profile(interpolated_data, x_variable='temperature', y_variable='pressure', date='2020-01-01', time='12:00:00')
+    if isinstance(data, pd.DataFrame):
+        # First try exact string match
+        profile_data = data[
+            (data['date'] == date) &
+            (data['time'] == time)
+        ]
+        
+        # If no match found, try datetime comparison
+        if len(profile_data) == 0:
+            # Since date and time are already datetime objects, compare directly
+            profile_data = data[
+                (data['date'] == target_date) &
+                (data['time'] == target_time)
+            ]
 
+        if len(profile_data) == 0:
+            print(f"No profile found for {date} {time}")
+            return None
+
+        return profile_data
+        
+    elif isinstance(data, (xr.Dataset, nc.Dataset)):
+        # First try exact string match
+        try:
+            profile_data = data.sel(date=date, time=time)
+        except Exception:
+            profile_data = None
+        
+        # If no match found, try datetime comparison
+        if profile_data is None or len(profile_data['num_profiles']) == 0:
+            try:
+                dates = pd.to_datetime([str(d) for d in data['date'].values])
+                times = pd.to_datetime([str(t) for t in data['time'].values])
+                
+                target_idx = np.where((dates.dt.date == target_date) & 
+                                    (times.dt.time == target_time))[0]
+                
+                if len(target_idx) > 0:
+                    profile_data = data.isel(num_profiles=target_idx[0])
+            except Exception:
+                print(f"No profile found for {date} {time}")
+                return None
+
+        if profile_data is None or len(profile_data['num_profiles']) == 0:
+            print(f"No profile found for {date} {time}")
+            return None
+
+        return profile_data
+        
+    else:
+        print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
+        return None
 
 
