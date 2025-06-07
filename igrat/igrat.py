@@ -18,7 +18,6 @@ import os
 import requests
 import zipfile
 from urllib.parse import urljoin
-import datetime
 import io
 import shutil
 import argparse
@@ -32,6 +31,7 @@ import mplcursors
 from matplotlib.widgets import Button
 import json
 from scipy import interpolate
+import datetime
 
 def download_station_file(station_id: str, output_dir: Optional[str] = None) -> Optional[str]:
     """
@@ -128,8 +128,8 @@ def read_station_data(station_id: str,
         path: Optional path to the station's data file
         main: Whether to include only main variables (True) or all variables (False)
         download_dir: Directory to save the output file 
-        start_date: Optional start date in YYYY-MM-DD format
-        end_date: Optional end date in YYYY-MM-DD format
+        start_date: Optional start date in YYYYMMDD format
+        end_date: Optional end date in YYYYMMDD format
         file_type: Optional file type to return, either 'netcdf', 'pandas', or 'df'
         
     Returns:
@@ -173,8 +173,8 @@ def read_station_data(station_id: str,
         
         >>> # Read data with date filtering and all variables
         >>> df = read_station_data(station, 
-        ...                       start_date='2020-01-01',
-        ...                       end_date='2020-01-31',
+        ...                       start_date='20200101',
+        ...                       end_date='20200131',
         ...                       main=False,
         ...                       file_type='df')
         >>> print(df.columns)
@@ -185,19 +185,6 @@ def read_station_data(station_id: str,
     """
 
     try:
-        # Convert string dates to datetime objects if provided
-        if start_date is not None:
-            try:
-                start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
-            except ValueError as e:
-                raise ValueError(f"Invalid start_date format. Expected YYYY-MM-DD, got {start_date}. Error: {e}")
-        
-        if end_date is not None:
-            try:
-                end_date = datetime.datetime.strptime(end_date, '%Y-%m-%d')
-            except ValueError as e:
-                raise ValueError(f"Invalid end_date format. Expected YYYY-MM-DD, got {end_date}. Error: {e}")
-
         # Set up the output file path
         if download_dir is None:
             download_dir = os.getcwd()
@@ -488,7 +475,7 @@ def read_station_data(station_id: str,
                 date_var.units = 'YYYYMMDD'
                 date_var.long_name = 'Date of sounding'
                 
-                time_var.units = 'hour'
+                time_var.units = 'HH'
                 time_var.long_name = 'Time of sounding (UTC)'
                 
                 pressure_var.units = 'hPa'
@@ -567,35 +554,6 @@ def read_station_data(station_id: str,
             # Create a list to store all the data
             data = []
             
-            # Convert dates and times to datetime objects
-            datetimes = []
-            for date, time in zip(dates, times):
-                # Convert date to string with leading zeros
-                date_str = f"{date:08d}"
-                
-                # If time is invalid (not between 0-23), use default time immediately
-                if not (0 <= time <= 23):
-                    try:
-                        dt = datetime.datetime.strptime(date_str, "%Y%m%d")
-                        dt = dt.replace(hour=23, minute=59)
-                        datetimes.append(dt)
-                    except ValueError:
-                        # If we can't parse the date either, use a default datetime
-                        dt = datetime.datetime(1900, 1, 1, 23, 59)
-                        datetimes.append(dt)
-                else:
-                    try:
-                        # Convert time to string with leading zeros
-                        time_str = f"{time:02d}"
-                        # Parse the datetime
-                        dt = datetime.datetime.strptime(f"{date_str}{time_str}", "%Y%m%d%H")
-                        datetimes.append(dt)
-                    except ValueError as e:
-                        print(f"Warning: Could not parse datetime for date={date}, time={time}: {e}")
-                        # Use default datetime if parsing fails
-                        dt = datetime.datetime(1900, 1, 1, 23, 59)
-                        datetimes.append(dt)
-            
             # Get station location information
             try:
                 station_info = stations_df[stations_df['station_id'] == station_id].iloc[0]
@@ -615,9 +573,9 @@ def read_station_data(station_id: str,
                         continue
                         
                     row = {
-                        'num_profile': i,  # Add the profile number
-                        'date': datetimes[i].date(),
-                        'time': datetimes[i].time(),
+                        'num_profiles': i,  # Add the profile number
+                        'date': dates[i],
+                        'time': times[i],
                         'pressure': pressure[i, j],
                         'height': gph[i, j],
                         'temperature': temp[i, j],
@@ -646,9 +604,9 @@ def read_station_data(station_id: str,
             
             # Filter by date if specified
             if start_date is not None:
-                df = df[df['date'].apply(lambda x: datetime.datetime.combine(x, datetime.time.min)) >= start_date]
+                df = df[df['date'] >= start_date]
             if end_date is not None:
-                df = df[df['date'].apply(lambda x: datetime.datetime.combine(x, datetime.time.min)) <= end_date]
+                df = df[df['date'] <= end_date]
             
             # Save to CSV
             df.to_csv(output_file, index=False)
@@ -857,11 +815,11 @@ def filter_by_date_range(df: pd.DataFrame,
     Parameters
     ----------
     df : pd.DataFrame
-        Sounding data with 'date' column in YYYY-MM-DD format.
+        Sounding data with 'date' column in YYYYMMDD format.
     start_date : str
-        Start date in YYYY-MM-DD format.
+        Start date in YYYYMMDD format.
     end_date : str
-        End date in YYYY-MM-DD format.
+        End date in YYYYMMDD format.
     file_type : str, optional
         Type of file to filter ('df' for DataFrame or 'nc' for NetCDF), by default 'df'
 
@@ -874,23 +832,16 @@ def filter_by_date_range(df: pd.DataFrame,
     --------
     >>> # Filter data for January 2020
     >>> df = read_station_data("USM00072520", file_type='df')
-    >>> filtered_df = filter_by_date_range(df, "2020-01-01", "2020-01-31")
+    >>> filtered_df = filter_by_date_range(df, "20200101", "20200131")
     >>> print(filtered_df['date'].min(), filtered_df['date'].max())
-    2020-01-01 2020-01-31
+    20200101 20200131
     """
     if file_type == 'df':
         if not isinstance(df, pd.DataFrame):
             raise TypeError(f"Expected pandas DataFrame, got {type(df).__name__}")
-            
-        # Convert string dates to datetime objects
-        start_dt = pd.to_datetime(start_date).date()
-        end_dt = pd.to_datetime(end_date).date()
-        
-        # Ensure date column is in datetime format
-        df['date'] = pd.to_datetime(df['date']).dt.date
         
         # Filter the DataFrame
-        mask = (df['date'] >= start_dt) & (df['date'] <= end_dt)
+        mask = (df['date'] >= start_date) & (df['date'] <= end_date)
         filtered_df = df[mask].copy()
         
         return filtered_df
@@ -899,13 +850,9 @@ def filter_by_date_range(df: pd.DataFrame,
         if not isinstance(df, xr.Dataset):
             raise TypeError(f"Expected xarray Dataset, got {type(df).__name__}")
             
-        # Convert input dates to YYYYMMDD format
-        start_dt = int(pd.to_datetime(start_date).strftime('%Y%m%d'))
-        end_dt = int(pd.to_datetime(end_date).strftime('%Y%m%d'))
-        
         # Find indices of first and last soundings within date range
-        start_idx = np.where(df['date'].values >= start_dt)[0][0]
-        end_idx = np.where(df['date'].values <= end_dt)[0][-1]
+        start_idx = np.where(df['date'].values >= start_date)[0][0]
+        end_idx = np.where(df['date'].values <= end_date)[0][-1]
         
         # Filter the Dataset using indices
         filtered_ds = df.isel(num_profiles=slice(start_idx, end_idx + 1))
@@ -1460,8 +1407,8 @@ def filter_stations(start_year: Optional[int] = None,
     stations_list = stations_df['station_id'].tolist()
     
     if has_date_range is not None:
-        start_date = datetime.datetime.strptime(has_date_range[0], '%Y-%m-%d')
-        end_date = datetime.datetime.strptime(has_date_range[1], '%Y-%m-%d')
+        start_date = has_date_range[0]
+        end_date = has_date_range[1]
         for station_id in stations_list[:]:  # Create a copy of the list to safely modify during iteration
             if availability_dir is None:
                 availability_data = get_availability_json(station_id)
@@ -1474,7 +1421,7 @@ def filter_stations(start_year: Optional[int] = None,
             has_data = False
             for year, month, day, hour in availability_data['raw_data']:
                 # Convert to datetime for easier comparison
-                current_date = datetime.datetime(year, month, day)
+                current_date = year * 10000 + month * 100 + day
                 
                 if start_date <= current_date <= end_date:
                     has_data = True
@@ -1517,8 +1464,8 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
                         max_index: float,
                         step_size: float,
                         method: str = 'linear',
-                        start_date: Optional[datetime.datetime] = None,
-                        end_date: Optional[datetime.datetime] = None,
+                        start_date: Optional[int] = None,
+                        end_date: Optional[int] = None,
                         fill_value: Optional[float] = None,
                         **kwargs) -> Union[pd.DataFrame, xr.Dataset]:
     """Interpolate station data onto a uniform grid using scipy's interpolation functions.
@@ -1547,9 +1494,9 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
     method : str, optional
         Interpolation method to use. See scipy.interpolate.interp1d for available methods.
         Default is 'linear'.
-    start_date : Optional[datetime.datetime], optional
+    start_date : Optional[int], optional
         Start date for filtering data, by default None
-    end_date : Optional[datetime.datetime], optional
+    end_date : Optional[int], optional
         End date for filtering data, by default None
     fill_value : Optional[float], optional
         Value to use for extrapolation, by default None
@@ -1586,7 +1533,7 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
         interpolated_data = data.copy()
         
         # Group by profile number to interpolate within each profile
-        grouped = interpolated_data.groupby('num_profile')
+        grouped = interpolated_data.groupby('num_profiles')
         
         # Create empty list to store interpolated profiles
         interpolated_profiles = []
@@ -1614,7 +1561,7 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
                     
                     # Create a new DataFrame for this profile
                     profile_df = pd.DataFrame({
-                        'num_profile': profile_num,
+                        'num_profiles': profile_num,
                         'date': profile['date'].iloc[0],
                         'time': profile['time'].iloc[0],
                         index_variable: grid,
@@ -1738,8 +1685,8 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
 
 def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset], 
                                variable: str,
-                               start_date: Optional[datetime.datetime] = None,
-                               end_date: Optional[datetime.datetime] = None,
+                               start_date: Optional[int] = None,
+                               end_date: Optional[int] = None,
                                fill_value: Optional[float] = None
                                ) -> Union[pd.DataFrame, xr.Dataset]:
     """Interpolate station data onto standard pressure levels.
@@ -1760,9 +1707,9 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
         - netCDF4 Dataset
     variable : str
         Name of the variable to interpolate (e.g., 'temperature' or 'wind_speed')
-    start_date : Optional[datetime.datetime], optional
+    start_date : Optional[int], optional
         Start date for filtering data, by default None
-    end_date : Optional[datetime.datetime], optional
+    end_date : Optional[int], optional
         End date for filtering data, by default None
     fill_value : Optional[float], optional
         Value to use for extrapolation, by default None
@@ -1811,7 +1758,7 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
         interpolated_data = data.copy()
         
         # Group by profile number to interpolate within each profile
-        grouped = interpolated_data.groupby('num_profile')
+        grouped = interpolated_data.groupby('num_profiles')
         
         # Create empty list to store interpolated profiles
         interpolated_profiles = []
@@ -1835,7 +1782,7 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
                 
                 # Create a new DataFrame for this profile
                 profile_df = pd.DataFrame({
-                    'num_profile': profile_num,
+                    'num_profiles': profile_num,
                     'date': profile['date'].iloc[0],
                     'time': profile['time'].iloc[0],
                     'pressure': grid,
@@ -1923,14 +1870,13 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
         raise TypeError(f"Expected pandas DataFrame, xarray Dataset, or netCDF4 Dataset, got {type(data).__name__}")
 
 def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
-    """
-    Get the availability of IGRA data from a DataFrame or Dataset.
-
+    """Get the availability of IGRA data from a DataFrame or Dataset.
+    
     Parameters
     ----------
     data : Union[pd.DataFrame, xr.Dataset]
         Input data containing the profiles
-
+        
     Returns
     -------
     Optional[Dict]
@@ -1938,7 +1884,7 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
         {
             year: {
                 month: {
-                    day: ['HH:MM:SS', ...]
+                    day: [hour, ...]
                 }
             }
         }
@@ -1952,21 +1898,26 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
     >>> times = availability[2020][1][1]  # Times for January 1, 2020
     >>> print(f"Available times: {times}")
     """
+    if data is None:
+        print("Error: No data provided")
+        return None
+        
     try:
         availability = []
         
         if isinstance(data, pd.DataFrame):
             # Extract date and time information from DataFrame
-            for _, row in data.groupby('num_profile').first().iterrows():
-                # Parse date string (YYYY-MM-DD)
-                date_parts = str(row['date']).split('-')
-                year = int(date_parts[0])
-                month = int(date_parts[1])
-                day = int(date_parts[2])
+            for _, row in data.groupby('num_profiles').first().iterrows():
+                # Handle float date values
+                date = int(float(row['date'])) if isinstance(row['date'], (str, float)) else int(row['date'])
+                time = int(float(row['time'])) if isinstance(row['time'], (str, float)) else int(row['time'])
                 
-                # Get time string directly (HH:MM:SS)
-                time_str = str(row['time'])
-                availability.append([year, month, day, time_str])
+                # Convert YYYYMMDD to year, month, day
+                year = date // 10000
+                month = (date % 10000) // 100
+                day = date % 100
+                
+                availability.append([year, month, day, time])
                 
         elif isinstance(data, (xr.Dataset, nc.Dataset)):
             # Extract date and time information from Dataset
@@ -1974,13 +1925,16 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
             times = data['time'].values
             
             for date, time in zip(dates, times):
+                # Handle float date values
+                date = int(float(date)) if isinstance(date, (str, float)) else int(date)
+                time = int(float(time)) if isinstance(time, (str, float)) else int(time)
+                
                 # Convert YYYYMMDD to year, month, day
-                year = int(date // 10000)
-                month = int((date % 10000) // 100)
-                day = int(date % 100)
-                # Format time as HH:MM:SS
-                time_str = f"{int(time):02d}:00:00"
-                availability.append([year, month, day, time_str])
+                year = date // 10000
+                month = (date % 10000) // 100
+                day = date % 100
+                
+                availability.append([year, month, day, time])
                 
         else:
             raise TypeError(f"Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
@@ -1991,7 +1945,7 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
         # Sort availability by year, month, day, time
         availability.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
         
-        for year, month, day, time_str in availability:
+        for year, month, day, time in availability:
             # Initialize year if not exists
             if year not in nested_availability:
                 nested_availability[year] = {}
@@ -2005,49 +1959,57 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
                 nested_availability[year][month][day] = []
             
             # Add time if not already in the list
-            if time_str not in nested_availability[year][month][day]:
-                nested_availability[year][month][day].append(time_str)
+            if time not in nested_availability[year][month][day]:
+                nested_availability[year][month][day].append(time)
                 # Sort times
                 nested_availability[year][month][day].sort()
 
         return nested_availability
-    
+        
     except Exception as e:
         print(f"Error processing availability data: {e}")
         return None
-    
+
 def get_years(data: Union[pd.DataFrame, xr.Dataset]) -> List[int]:
     """Get the years of the data."""
     availability = get_availability(data)
+    if availability is None:
+        return []
     return list(availability.keys())
 
 def get_months(data: Union[pd.DataFrame, xr.Dataset], year: int) -> List[int]:
     """Get the months of the data for a specific year."""
     availability = get_availability(data)
+    if availability is None:
+        return []
     return list(availability[year].keys())
 
 def get_days(data: Union[pd.DataFrame, xr.Dataset], year: int, month: int) -> List[int]:
     """Get the days of the data for a specific year and month."""
     availability = get_availability(data)
+    if availability is None:
+        return []
     return list(availability[year][month].keys())
 
 def get_times(data: Union[pd.DataFrame, xr.Dataset], year: int, month: int, day: int) -> List[str]:
-    """Get the times of the data for a specific year, month, and day."""
+    """Get the times of the data for a specific date."""
     availability = get_availability(data)
+    if availability is None:
+        return []
     return availability[year][month][day]
 
 def get_num_soundings(data: Union[pd.DataFrame, xr.Dataset]) -> int:
-    """Get the number of soundings for a specific year, month, and day."""
-    if isinstance(data, pd.DataFrame):
-        return len(data['num_profile'].unique())
-    else:
-        return len(data['num_profiles'])
+    """Get the number of soundings in the data."""
+    availability = get_availability(data)
+    if availability is None:
+        return 0
+    return len(availability)
 
 def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
                 x_variable: str,
                 y_variable: str,
-                date: Optional[str] = None,  # Format: YYYY-MM-DD
-                time: Optional[str] = None,  # Format: HH:MM:SS
+                date: Optional[int] = None,  # Format: YYYYMMDD
+                time: Optional[int] = None,  # Format: HH
                 figsize: Tuple[int, int] = (10, 8),
                 title: Optional[str] = None,
                 xlabel: Optional[str] = None,
@@ -2074,53 +2036,43 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
     if data is None:
         print("Error: No data provided")
         return None
-
+        
     # Check if this is a single profile (from get_profile)
     is_single_profile = False
     if isinstance(data, (xr.Dataset, nc.Dataset)):
         if 'num_profiles' in data.dims and data.dims['num_profiles'] == 1:
             is_single_profile = True
             # Get date and time from the profile
-            date = str(pd.to_datetime(str(data['date'].values[0])))
-            time = f"{int(data['time'].values[0]):02d}:00:00"
+            date = data['date'].values[0]
+            time = data['time'].values[0]
 
     # Get unique dates and times from data
     if isinstance(data, pd.DataFrame):
         unique_dates = data['date'].unique()
         unique_times = data['time'].unique()
     else:  # xarray Dataset
-        # Convert dates to datetime objects
+        # Get dates and times
         dates = data['date'].values
         times = data['time'].values
         
-        # Convert dates to YYYY-MM-DD format
-        unique_dates = pd.to_datetime([str(d) for d in dates]).unique()
-        unique_times = times
+        # Get unique values using numpy
+        unique_dates = np.unique(dates)
+        unique_times = np.unique(times)
 
     # If date/time not provided and not a single profile, check if there's a single unique combination
     if (date is None or time is None) and not is_single_profile:
         if len(unique_dates) == 1 and len(unique_times) == 1:
-            date = str(unique_dates[0])
-            time = f"{int(unique_times[0]):02d}:00:00"
+            date = unique_dates[0]
+            time = unique_times[0]
         else:
             raise ValueError("Multiple dates/times found in data. Please specify date and time.")
 
     if isinstance(data, pd.DataFrame):
-        # First try exact string match
+        # First try exact match
         profile_data = data[
             (data['date'] == date) &
             (data['time'] == time)
         ]
-        
-        # If no match found, try datetime comparison
-        if len(profile_data) == 0:
-            target_datetime = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M:%S")
-            target_date = target_datetime.date()
-            target_time = target_datetime.time()
-            profile_data = data[
-                (data['date'] == target_date) &
-                (data['time'] == target_time)
-            ]
 
         if len(profile_data) == 0:
             print(f"No profile found for {date} {time}")
@@ -2144,14 +2096,9 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
             profile_data = data
         else:
             # For full datasets, find the profile for the given date/time
-            # Convert target date to YYYYMMDD format
-            target_date_int = int(datetime.datetime.strptime(date, "%Y-%m-%d").strftime('%Y%m%d'))
-            # Convert target time to hour
-            target_time_int = int(datetime.datetime.strptime(time, "%H:%M:%S").hour)
-            
             # Find matching profile
-            target_idx = np.where((data['date'].values == target_date_int) & 
-                                (data['time'].values == target_time_int))[0]
+            target_idx = np.where((data['date'].values == date) & 
+                                (data['time'].values == time))[0]
             
             if len(target_idx) == 0:
                 print(f"No profile found for {date} {time}")
@@ -2239,9 +2186,9 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
     data : Union[pd.DataFrame, xr.Dataset]
         Input data containing the profiles
     date : str
-        Date in YYYY-MM-DD format
+        Date in YYYYMMDD format
     time : str
-        Time in HH:MM:SS format
+        Time in HH format
         
     Returns
     -------
@@ -2250,15 +2197,6 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
     """
     if data is None:
         print("Error: No data provided")
-        return None
-        
-    # Try to parse the date and time into datetime objects
-    try:
-        target_datetime = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M:%S")
-        target_date = target_datetime.date()
-        target_time = target_datetime.time()
-    except ValueError as e:
-        print(f"Error parsing date/time: {e}")
         return None
 
     if isinstance(data, pd.DataFrame):
@@ -2272,8 +2210,8 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         if len(profile_data) == 0:
             # Since date and time are already datetime objects, compare directly
             profile_data = data[
-                (data['date'] == target_date) &
-                (data['time'] == target_time)
+                (data['date'] == date) &
+                (data['time'] == time)
             ]
 
         if len(profile_data) == 0:
@@ -2296,19 +2234,9 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         dates = data['date'].values
         times = data['time'].values
         
-        # Convert target date/time to match data format
-        # IGRA data stores dates as YYYYMMDD and times as hours (0-23)
-        target_date_int = int(target_date.strftime('%Y%m%d'))
-        target_time_int = target_time.hour  # Just use the hour component
-        
-        # Print debug information
-        print(f"Looking for date: {target_date_int}, time: {target_time_int}")
-        print(f"Available dates range: {dates.min()} to {dates.max()}")
-        print(f"Available times range: {times.min()} to {times.max()}")
-        
         # Find matching profile
-        target_idx = np.where((dates == target_date_int) & 
-                            (times == target_time_int))[0]
+        target_idx = np.where((dates == date) & 
+                            (times == time))[0]
         
         if len(target_idx) == 0:
             print(f"No profile found for {date} {time}")
@@ -2415,8 +2343,8 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
     None
     """
     if isinstance(data, xr.Dataset):
-        # If already a Dataset, just save it
-        data.to_netcdf(name)
+        # If already a Dataset, raise error
+        raise ValueError("Data is already in netCDF format.")
     elif isinstance(data, pd.DataFrame):
         # Convert DataFrame to Dataset
         # First, identify datetime columns
@@ -2459,17 +2387,8 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
         
         # Fill the arrays
         for i, ((date, time), profile) in enumerate(profiles):
-            # Convert date to YYYYMMDD format if it's a datetime.date object
-            if isinstance(date, datetime.date):
-                dates[i] = int(date.strftime('%Y%m%d'))
-            else:
-                dates[i] = date
-                
-            # Convert time to hour format if it's a datetime.time object
-            if isinstance(time, datetime.time):
-                times[i] = time.hour
-            else:
-                times[i] = time
+            dates[i] = date
+            times[i] = time
             
             # Get the profile data
             profile_data = profile.reset_index(drop=True)
@@ -2514,7 +2433,7 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
         # Add attributes
         ds.attrs['title'] = 'IGRA Data'
         ds.attrs['source'] = 'Converted from DataFrame'
-        ds.attrs['creation_date'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        ds.attrs['creation_date'] = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
         ds.attrs['latitude'] = df['latitude'].iloc[0]
         ds.attrs['longitude'] = df['longitude'].iloc[0]
 
@@ -2533,12 +2452,89 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
     else:
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
+
+def convert_to_df(data: Union[pd.DataFrame, xr.Dataset], name: str):
+    """Convert data to CSV format and save it.
     
+    Parameters
+    ----------
+    data : Union[pd.DataFrame, xr.Dataset]
+        Data to convert and save
+    name : str
+        Name of the output CSV file
+        
+    Returns
+    -------
+    None
+    """
+    if isinstance(data, pd.DataFrame):
+        # If already a DataFrame, raise error
+        raise ValueError("Data is already in DataFrame format.")
+    elif isinstance(data, xr.Dataset):
+        # Convert Dataset to DataFrame
+        df = data.to_dataframe()
+        
+        # Reset index to make all coordinates into columns
+        df = df.reset_index()
+        
+        # Drop the 'levels' column if it exists
+        if 'levels' in df.columns:
+            df = df.drop(columns=['levels'])
+        
+        # Save to CSV
+        df.to_csv(name, index=False)
+    else:
+        print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
+        return None
 
-df = read_station_data("USM00072435", file_type="df")
-print(df.columns)
-convert_to_netcdf(df, "station_data.nc")
+def print_dataset_info(data: Union[xr.Dataset, nc.Dataset], detailed: bool = False) -> None:
+    """Print information about a netCDF dataset.
+    
+    Parameters
+    ----------
+    data : Union[xr.Dataset, nc.Dataset]
+        The dataset to print information about
+    detailed : bool, optional
+        Whether to print detailed information, by default False
+        
+    Examples
+    --------
+    >>> # Print basic information
+    >>> print_dataset_info(dataset)
+    >>> # Print detailed information
+    >>> print_dataset_info(dataset, detailed=True)
+    """
+    if isinstance(data, nc.Dataset):
+        # Convert netCDF4 Dataset to xarray Dataset
+        data = xr.Dataset.from_dict(data.variables)
+    
+    print("\n=== Dataset Overview ===")
+    print(data)
+    
+    if detailed:
+        print("\n=== Detailed Information ===")
+        print(data.info())
+        
+        print("\n=== Statistical Information ===")
+        print(data.describe())
+        
+        print("\n=== Dimensions ===")
+        for dim, size in data.dims.items():
+            print(f"{dim}: {size}")
+            
+        print("\n=== Coordinates ===")
+        for coord in data.coords:
+            print(f"\n{coord}:")
+            print(data[coord])
+            
+        print("\n=== Variables ===")
+        for var in data.data_vars:
+            print(f"\n{var}:")
+            print(data[var])
+            
+        print("\n=== Attributes ===")
+        for attr, value in data.attrs.items():
+            print(f"{attr}: {value}")
 
-data = load_data("station_data.nc")
-interpolated_data = interp_data(data, 'gph', 'temperature', 0, 40000, 200, method='cubic', fill_value=np.nan)
-fig = plot_profile(interpolated_data, 'temperature', 'gph', '1995-02-01', '12:00:00')
+#### DATE FORMAT YYYYMMDD
+#### TIME FORMAT HH
