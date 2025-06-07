@@ -663,7 +663,7 @@ def read_station_data(station_id: str,
         print(f"Error processing data for station {station_id}: {e}")
         return None
     
-def open_nc(file_path: Union[str, Path], print_info: bool = True) -> xr.Dataset:
+def _load_nc(file_path: Union[str, Path], print_info: bool = True) -> xr.Dataset:
     """
     Open a NetCDF file and optionally print its overview information.
     
@@ -730,7 +730,7 @@ def open_nc(file_path: Union[str, Path], print_info: bool = True) -> xr.Dataset:
     
     return ds
 
-def open_df(file_path: Union[str, Path], print_info: bool = True) -> pd.DataFrame:
+def _load_df(file_path: Union[str, Path], print_info: bool = True) -> pd.DataFrame:
     """
     Open a file as a pandas DataFrame and optionally print its overview information.
     Supports various file formats including CSV, Excel, Parquet, and more.
@@ -814,7 +814,7 @@ def open_df(file_path: Union[str, Path], print_info: bool = True) -> pd.DataFram
     
     return df 
 
-def open_data(file_path: Union[str, Path], print_info: bool = True) -> Union[pd.DataFrame, xr.Dataset]:
+def load_data(file_path: Union[str, Path], print_info: bool = True) -> Union[pd.DataFrame, xr.Dataset]:
     """
     Wrapper function to open a file as a pandas DataFrame or xarray Dataset.
 
@@ -833,18 +833,18 @@ def open_data(file_path: Union[str, Path], print_info: bool = True) -> Union[pd.
     Examples
     --------
     >>> # Open a CSV file and print its information
-    >>> df = open_data("path/to/data.csv")
+    >>> df = load_data("path/to/data.csv")
     
     >>> # Open a NetCDF file without printing information
-    >>> ds = open_data("path/to/data.nc", print_info=False)
+    >>> ds = load_data("path/to/data.nc", print_info=False)
     """
     # Convert string path to Path object if necessary
     file_path = Path(file_path)
 
     if file_path.suffix.lower() in ['.csv', '.xlsx', '.xls', '.parquet', '.json', '.pkl']:
-        return open_df(file_path, print_info)
+        return _load_df(file_path, print_info)
     elif file_path.suffix.lower() in ['.nc']:
-        return open_nc(file_path, print_info)
+        return _load_nc(file_path, print_info)
     else:
         raise ValueError(f"Unsupported file format: {file_path.suffix}")
     
@@ -1561,33 +1561,6 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
     -------
     Union[pd.DataFrame, xr.Dataset]
         Interpolated data with the same format as the input, but with uniform grid spacing
-
-    Examples
-    --------
-    >>> # Basic linear interpolation
-    >>> df = read_station_data("USM00072520", file_type='df')
-    >>> interpolated_df = interp_data_advanced(
-    ...     df,
-    ...     index_variable='height',
-    ...     variable='temperature',
-    ...     min_index=0,
-    ...     max_index=10000,
-    ...     step_size=100
-    ... )
-
-    >>> # Cubic spline interpolation with custom parameters
-    >>> ds = read_station_data("USM00072520", file_type='netcdf')
-    >>> interpolated_ds = interp_data_advanced(
-    ...     ds,
-    ...     index_variable='pressure',
-    ...     variable='wind_speed',
-    ...     min_index=1000,
-    ...     max_index=100,
-    ...     step_size=10,
-    ...     method='cubic',
-    ...     bounds_error=False,
-    ...     fill_value=0
-    ... )
     """
     from scipy import interpolate
     import numpy as np
@@ -1617,6 +1590,7 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
         
         # Create empty list to store interpolated profiles
         interpolated_profiles = []
+        skipped_profiles = []
         
         # Interpolate each profile onto the uniform grid
         for profile_num, profile in grouped:
@@ -1633,20 +1607,32 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
                 x = x[sort_idx]
                 y = y[sort_idx]
                 
-                # Create interpolation function
-                f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
-                interpolated_values = f(grid)
-                
-                # Create a new DataFrame for this profile
-                profile_df = pd.DataFrame({
-                    'num_profile': profile_num,
-                    'date': profile['date'].iloc[0],
-                    'time': profile['time'].iloc[0],
-                    index_variable: grid,
-                    variable: interpolated_values
-                })
-                
-                interpolated_profiles.append(profile_df)
+                try:
+                    # Create interpolation function
+                    f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
+                    interpolated_values = f(grid)
+                    
+                    # Create a new DataFrame for this profile
+                    profile_df = pd.DataFrame({
+                        'num_profile': profile_num,
+                        'date': profile['date'].iloc[0],
+                        'time': profile['time'].iloc[0],
+                        index_variable: grid,
+                        variable: interpolated_values
+                    })
+                    
+                    interpolated_profiles.append(profile_df)
+                except ValueError as e:
+                    skipped_profiles.append((profile_num, profile['date'].iloc[0], profile['time'].iloc[0], str(e)))
+            else:
+                skipped_profiles.append((profile_num, profile['date'].iloc[0], profile['time'].iloc[0], "Insufficient valid data points"))
+        
+        # Print information about skipped profiles
+        if skipped_profiles:
+            print("\nThe following profiles were skipped during interpolation:")
+            for profile_num, date, time, reason in skipped_profiles:
+                print(f"Profile {profile_num} (Date: {date}, Time: {time}): {reason}")
+            print()
         
         # Combine all interpolated profiles
         if interpolated_profiles:
@@ -1681,6 +1667,8 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
         
         # Create a new dataset with the interpolated values
         interpolated_values = []
+        skipped_profiles = []
+        
         for profile_idx in range(len(interpolated_data.num_profiles)):
             # Get the original values for this profile
             x = interpolated_data[index_name].isel(num_profiles=profile_idx).values
@@ -1695,11 +1683,27 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
                 x = x[sort_idx]
                 y = y[sort_idx]
                 
-                # Create interpolation function
-                f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
-                interpolated_values.append(f(grid))
+                try:
+                    # Create interpolation function
+                    f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
+                    interpolated_values.append(f(grid))
+                except ValueError as e:
+                    date = interpolated_data['date'].isel(num_profiles=profile_idx).values
+                    time = interpolated_data['time'].isel(num_profiles=profile_idx).values
+                    skipped_profiles.append((profile_idx, date, time, str(e)))
+                    interpolated_values.append(np.full_like(grid, np.nan))
             else:
+                date = interpolated_data['date'].isel(num_profiles=profile_idx).values
+                time = interpolated_data['time'].isel(num_profiles=profile_idx).values
+                skipped_profiles.append((profile_idx, date, time, "Insufficient valid data points"))
                 interpolated_values.append(np.full_like(grid, np.nan))
+        
+        # Print information about skipped profiles
+        if skipped_profiles:
+            print("\nThe following profiles were skipped during interpolation:")
+            for profile_idx, date, time, reason in skipped_profiles:
+                print(f"Profile {profile_idx} (Date: {date}, Time: {time}): {reason}")
+            print()
         
         # Create new dataset with interpolated values
         new_data = xr.Dataset(
@@ -2071,30 +2075,35 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         print("Error: No data provided")
         return None
 
+    # Check if this is a single profile (from get_profile)
+    is_single_profile = False
+    if isinstance(data, (xr.Dataset, nc.Dataset)):
+        if 'num_profiles' in data.dims and data.dims['num_profiles'] == 1:
+            is_single_profile = True
+            # Get date and time from the profile
+            date = str(pd.to_datetime(str(data['date'].values[0])))
+            time = f"{int(data['time'].values[0]):02d}:00:00"
+
     # Get unique dates and times from data
     if isinstance(data, pd.DataFrame):
         unique_dates = data['date'].unique()
         unique_times = data['time'].unique()
     else:  # xarray Dataset
-        unique_dates = pd.to_datetime([str(d) for d in data['date'].values]).unique()
-        unique_times = pd.to_datetime([str(t) for t in data['time'].values]).unique()
+        # Convert dates to datetime objects
+        dates = data['date'].values
+        times = data['time'].values
+        
+        # Convert dates to YYYY-MM-DD format
+        unique_dates = pd.to_datetime([str(d) for d in dates]).unique()
+        unique_times = times
 
-    # If date/time not provided, check if there's a single unique combination
-    if date is None or time is None:
+    # If date/time not provided and not a single profile, check if there's a single unique combination
+    if (date is None or time is None) and not is_single_profile:
         if len(unique_dates) == 1 and len(unique_times) == 1:
             date = str(unique_dates[0])
-            time = str(unique_times[0])
+            time = f"{int(unique_times[0]):02d}:00:00"
         else:
             raise ValueError("Multiple dates/times found in data. Please specify date and time.")
-        
-    # Try to parse the date and time into datetime objects
-    try:
-        target_datetime = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M:%S")
-        target_date = target_datetime.date()
-        target_time = target_datetime.time()
-    except ValueError as e:
-        print(f"Error parsing date/time: {e}")
-        return None
 
     if isinstance(data, pd.DataFrame):
         # First try exact string match
@@ -2105,7 +2114,9 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         
         # If no match found, try datetime comparison
         if len(profile_data) == 0:
-            # Since date and time are already datetime objects, compare directly
+            target_datetime = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M:%S")
+            target_date = target_datetime.date()
+            target_time = target_datetime.time()
             profile_data = data[
                 (data['date'] == target_date) &
                 (data['time'] == target_time)
@@ -2127,127 +2138,96 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         x_data = profile_data[x_variable][valid_mask]
         y_data = profile_data[y_variable][valid_mask]
 
-        if len(x_data) == 0 or len(y_data) == 0:
-            print(f"Error: No valid data points found for {x_variable} vs {y_variable}")
-            return None
-
-        # Create the plot
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Plot the profile
-        ax.plot(x_data, y_data)
-        
-        # Set labels and title with units
-        if xlabel:
-            ax.set_xlabel(xlabel)
-        else:
-            unit = units.get(x_variable, '')
-            ax.set_xlabel(f"{x_variable.capitalize()} [{unit}]")
-            
-        if ylabel:
-            ax.set_ylabel(ylabel)
-        else:
-            unit = units.get(y_variable, '')
-            ax.set_ylabel(f"{y_variable.capitalize()} [{unit}]")
-            
-        if title:
-            ax.set_title(title)
-        else:
-            ax.set_title(f"{y_variable.capitalize()} vs {x_variable.capitalize()}\n{date} {time}")
-            
-        # Invert y-axis if y_variable is pressure
-        if y_variable == 'pressure':
-            ax.invert_yaxis()
-            
-        if grid:
-            ax.grid(True)
-            
-        if show:
-            plt.show()
-            
-        return fig
-        
     elif isinstance(data, (xr.Dataset, nc.Dataset)):
-        # First try exact string match
-        try:
-            profile_data = data.sel(date=date, time=time)
-        except Exception:
-            profile_data = None
-        
-        # If no match found, try datetime comparison
-        if profile_data is None or len(profile_data[x_variable]) == 0:
-            try:
-                dates = pd.to_datetime([str(d) for d in data['date'].values])
-                times = pd.to_datetime([str(t) for t in data['time'].values])
-                
-                target_idx = np.where((dates.dt.date == target_date) & 
-                                    (times.dt.time == target_time))[0]
-                
-                if len(target_idx) > 0:
-                    profile_data = data.isel(num_profiles=target_idx[0])
-            except Exception:
+        if is_single_profile:
+            # For single profiles from get_profile, use the data directly
+            profile_data = data
+        else:
+            # For full datasets, find the profile for the given date/time
+            # Convert target date to YYYYMMDD format
+            target_date_int = int(datetime.datetime.strptime(date, "%Y-%m-%d").strftime('%Y%m%d'))
+            # Convert target time to hour
+            target_time_int = int(datetime.datetime.strptime(time, "%H:%M:%S").hour)
+            
+            # Find matching profile
+            target_idx = np.where((data['date'].values == target_date_int) & 
+                                (data['time'].values == target_time_int))[0]
+            
+            if len(target_idx) == 0:
                 print(f"No profile found for {date} {time}")
                 return None
-
-        if profile_data is None or len(profile_data[x_variable]) == 0:
-            print(f"No profile found for {date} {time}")
-            return None
-
-        # Filter out invalid values (NaN, -9999, -8888)
+                
+            profile_data = data.isel(num_profiles=target_idx[0])
+        
+        # Handle height/gph synonym
+        x_variable = 'gph' if x_variable == 'height' else x_variable
+        y_variable = 'gph' if y_variable == 'height' else y_variable
+        
+        # Get the data arrays
+        x_array = profile_data[x_variable]
+        y_array = profile_data[y_variable]
+        
+        # Convert to numpy arrays for masking
+        x_values = x_array.values.flatten()
+        y_values = y_array.values.flatten()
+        
+        # Create mask for valid values
         valid_mask = (
-            ~np.isnan(profile_data[x_variable]) & 
-            ~np.isnan(profile_data[y_variable]) &
-            (profile_data[x_variable] != -9999) &
-            (profile_data[x_variable] != -8888) &
-            (profile_data[y_variable] != -9999) &
-            (profile_data[y_variable] != -8888)
+            ~np.isnan(x_values) & 
+            ~np.isnan(y_values) &
+            (x_values != -9999) &
+            (x_values != -8888) &
+            (y_values != -9999) &
+            (y_values != -8888)
         )
-        x_data = profile_data[x_variable][valid_mask]
-        y_data = profile_data[y_variable][valid_mask]
+        
+        # Apply mask
+        x_data = x_values[valid_mask]
+        y_data = y_values[valid_mask]
 
-        if len(x_data) == 0 or len(y_data) == 0:
-            print(f"Error: No valid data points found for {x_variable} vs {y_variable}")
-            return None
-
-        # Create the plot
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Plot the profile - convert xarray DataArrays to numpy arrays
-        ax.plot(x_data.values.flatten(), y_data.values.flatten())
-        
-        # Set labels and title with units
-        if xlabel:
-            ax.set_xlabel(xlabel)
-        else:
-            unit = units.get(x_variable, '')
-            ax.set_xlabel(f"{x_variable.capitalize()} [{unit}]")
-            
-        if ylabel:
-            ax.set_ylabel(ylabel)
-        else:
-            unit = units.get(y_variable, '')
-            ax.set_ylabel(f"{y_variable.capitalize()} [{unit}]")
-            
-        if title:
-            ax.set_title(title)
-        else:
-            ax.set_title(f"{y_variable.capitalize()} vs {x_variable.capitalize()}\n{date} {time}")
-            
-        # Invert y-axis if y_variable is pressure
-        if y_variable == 'pressure':
-            ax.invert_yaxis()
-            
-        if grid:
-            ax.grid(True)
-            
-        if show:
-            plt.show()
-            
-        return fig
-        
     else:
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
+
+    if len(x_data) == 0 or len(y_data) == 0:
+        print(f"Error: No valid data points found for {x_variable} vs {y_variable}")
+        return None
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot the profile
+    ax.plot(x_data, y_data)
+    
+    # Set labels and title with units
+    if xlabel:
+        ax.set_xlabel(xlabel)
+    else:
+        unit = units.get(x_variable, '')
+        ax.set_xlabel(f"{x_variable.capitalize()} [{unit}]")
+        
+    if ylabel:
+        ax.set_ylabel(ylabel)
+    else:
+        unit = units.get(y_variable, '')
+        ax.set_ylabel(f"{y_variable.capitalize()} [{unit}]")
+        
+    if title:
+        ax.set_title(title)
+    else:
+        ax.set_title(f"{y_variable.capitalize()} vs {x_variable.capitalize()}\n{date} {time}")
+        
+    # Invert y-axis if y_variable is pressure
+    if y_variable == 'pressure':
+        ax.invert_yaxis()
+        
+    if grid:
+        ax.grid(True)
+        
+    if show:
+        plt.show()
+        
+    return fig
 
 def get_profile(data: Union[pd.DataFrame, xr.Dataset],
                 date: str,
@@ -2303,33 +2283,58 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         return profile_data
         
     elif isinstance(data, (xr.Dataset, nc.Dataset)):
-        # First try exact string match
-        try:
-            profile_data = data.sel(date=date, time=time)
-        except Exception:
-            profile_data = None
+        # Convert netCDF4 Dataset to xarray Dataset if needed
+        if isinstance(data, nc.Dataset):
+            data = xr.Dataset.from_dict(data.variables)
+            
+        # Validate that required variables exist
+        if 'date' not in data.variables or 'time' not in data.variables:
+            print("Error: Dataset must contain 'date' and 'time' variables")
+            return None
+            
+        # Get date and time values from data
+        dates = data['date'].values
+        times = data['time'].values
         
-        # If no match found, try datetime comparison
-        if profile_data is None or len(profile_data['num_profiles']) == 0:
-            try:
-                dates = pd.to_datetime([str(d) for d in data['date'].values])
-                times = pd.to_datetime([str(t) for t in data['time'].values])
-                
-                target_idx = np.where((dates.dt.date == target_date) & 
-                                    (times.dt.time == target_time))[0]
-                
-                if len(target_idx) > 0:
-                    profile_data = data.isel(num_profiles=target_idx[0])
-            except Exception:
-                print(f"No profile found for {date} {time}")
-                return None
-
-        if profile_data is None or len(profile_data['num_profiles']) == 0:
+        # Convert target date/time to match data format
+        # IGRA data stores dates as YYYYMMDD and times as hours (0-23)
+        target_date_int = int(target_date.strftime('%Y%m%d'))
+        target_time_int = target_time.hour  # Just use the hour component
+        
+        # Print debug information
+        print(f"Looking for date: {target_date_int}, time: {target_time_int}")
+        print(f"Available dates range: {dates.min()} to {dates.max()}")
+        print(f"Available times range: {times.min()} to {times.max()}")
+        
+        # Find matching profile
+        target_idx = np.where((dates == target_date_int) & 
+                            (times == target_time_int))[0]
+        
+        if len(target_idx) == 0:
             print(f"No profile found for {date} {time}")
             return None
-
-        return profile_data
+            
+        # Create new dataset with single profile
+        new_data = xr.Dataset()
         
+        # Copy all variables, selecting only the matching profile
+        for var_name in data.variables:
+            if 'num_profiles' in data[var_name].dims:
+                # Create new variable with single profile
+                new_data[var_name] = xr.DataArray(
+                    data[var_name].values[target_idx[0]:target_idx[0]+1],
+                    dims=['num_profiles'] + [d for d in data[var_name].dims if d != 'num_profiles'],
+                    coords={'num_profiles': [0]},
+                    attrs=data[var_name].attrs
+                )
+            else:
+                new_data[var_name] = data[var_name]
+                
+        # Copy all attributes
+        new_data.attrs.update(data.attrs)
+        
+        return new_data
+            
     else:
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
@@ -2376,3 +2381,164 @@ def get_availability_json_batch(directory: str, station_list: Optional[List[str]
         print(f"Station {i+1} of {len(station_list)}: {station_id} has {availability_data['num_total_soundings']} soundings")
 
     print(f"Error processing {len(error_stations)} stations: {error_stations}")
+
+def save_data(data: Union[pd.DataFrame, xr.Dataset], name: str):
+    """Save a Dataset to a netcdf file or a DataFrame to a csv file.
+    
+    Parameters
+    ----------
+    data : Union[pd.DataFrame, xr.Dataset]
+        Data to save
+    name : str
+        Name of the file to save
+    """
+    if isinstance(data, xr.Dataset):
+        data.to_netcdf(name)
+    elif isinstance(data, pd.DataFrame):
+        data.to_csv(name, index=False)
+    else:
+        print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
+        return None
+
+def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
+    """Convert data to netCDF format and save it.
+    
+    Parameters
+    ----------
+    data : Union[pd.DataFrame, xr.Dataset]
+        Data to convert and save
+    name : str
+        Name of the output netCDF file
+        
+    Returns
+    -------
+    None
+    """
+    if isinstance(data, xr.Dataset):
+        # If already a Dataset, just save it
+        data.to_netcdf(name)
+    elif isinstance(data, pd.DataFrame):
+        # Convert DataFrame to Dataset
+        # First, identify datetime columns
+        datetime_cols = []
+        for col in data.columns:
+            if pd.api.types.is_datetime64_any_dtype(data[col]):
+                datetime_cols.append(col)
+        
+        # Create a copy of the DataFrame to avoid modifying the original
+        df = data.copy()
+        
+        # Convert datetime columns to appropriate format
+        for col in datetime_cols:
+            if col == 'date':
+                # Convert to YYYYMMDD integer format
+                df[col] = df[col].dt.strftime('%Y%m%d').astype(np.int32)
+            elif col == 'time':
+                # Convert to hour integer format
+                df[col] = df[col].dt.hour.astype(np.int32)
+        
+        # Group by date and time to get profiles
+        profiles = df.groupby(['date', 'time'])
+        
+        # Get number of profiles and max levels
+        num_profiles = len(profiles)
+        max_levels = profiles.size().max()
+        
+        # Create arrays for each variable
+        dates = np.zeros(num_profiles, dtype=np.int32)
+        times = np.zeros(num_profiles, dtype=np.int32)
+        
+        # Create arrays for the main variables
+        pressure = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
+        gph = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
+        temp = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
+        rh = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
+        wind_dir = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
+        wind_speed = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
+        dewpoint = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
+        
+        # Fill the arrays
+        for i, ((date, time), profile) in enumerate(profiles):
+            # Convert date to YYYYMMDD format if it's a datetime.date object
+            if isinstance(date, datetime.date):
+                dates[i] = int(date.strftime('%Y%m%d'))
+            else:
+                dates[i] = date
+                
+            # Convert time to hour format if it's a datetime.time object
+            if isinstance(time, datetime.time):
+                times[i] = time.hour
+            else:
+                times[i] = time
+            
+            # Get the profile data
+            profile_data = profile.reset_index(drop=True)
+            
+            # Fill the arrays with profile data
+            if 'pressure' in profile_data.columns:
+                pressure[i, :len(profile_data)] = profile_data['pressure'].values
+            if 'gph' in profile_data.columns:
+                gph[i, :len(profile_data)] = profile_data['gph'].values
+            elif 'height' in profile_data.columns:
+                gph[i, :len(profile_data)] = profile_data['height'].values
+            if 'temperature' in profile_data.columns:
+                temp[i, :len(profile_data)] = profile_data['temperature'].values
+            if 'relative_humidity' in profile_data.columns:
+                rh[i, :len(profile_data)] = profile_data['relative_humidity'].values
+            if 'wind_direction' in profile_data.columns:
+                wind_dir[i, :len(profile_data)] = profile_data['wind_direction'].values
+            if 'wind_speed' in profile_data.columns:
+                wind_speed[i, :len(profile_data)] = profile_data['wind_speed'].values
+            if 'dewpoint' in profile_data.columns:
+                dewpoint[i, :len(profile_data)] = profile_data['dewpoint'].values
+        
+        # Create the Dataset
+        ds = xr.Dataset(
+            data_vars={
+                'date': (['num_profiles'], dates),
+                'time': (['num_profiles'], times),
+                'pressure': (['num_profiles', 'levels'], pressure),
+                'gph': (['num_profiles', 'levels'], gph),
+                'temperature': (['num_profiles', 'levels'], temp),
+                'relative_humidity': (['num_profiles', 'levels'], rh),
+                'wind_direction': (['num_profiles', 'levels'], wind_dir),
+                'wind_speed': (['num_profiles', 'levels'], wind_speed),
+                'dewpoint': (['num_profiles', 'levels'], dewpoint)
+            },
+            coords={
+                'num_profiles': np.arange(num_profiles),
+                'levels': np.arange(max_levels)
+            }
+        )
+        
+        # Add attributes
+        ds.attrs['title'] = 'IGRA Data'
+        ds.attrs['source'] = 'Converted from DataFrame'
+        ds.attrs['creation_date'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        ds.attrs['latitude'] = df['latitude'].iloc[0]
+        ds.attrs['longitude'] = df['longitude'].iloc[0]
+
+        
+        # Add variable attributes
+        ds.pressure.attrs['units'] = 'hPa'
+        ds.gph.attrs['units'] = 'm'
+        ds.temperature.attrs['units'] = '°C'
+        ds.relative_humidity.attrs['units'] = '%'
+        ds.wind_direction.attrs['units'] = 'degrees'
+        ds.wind_speed.attrs['units'] = 'm/s'
+        ds.dewpoint.attrs['units'] = '°C'
+        
+        # Save to netCDF
+        ds.to_netcdf(name)
+    else:
+        print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
+        return None
+    
+
+df = read_station_data("USM00072435", file_type="df")
+print(df.columns)
+convert_to_netcdf(df, "station_data.nc")
+
+data = load_data("station_data.nc")
+interpolated_data = interp_data(data, 'gph', 'temperature', 0, 40000, 200, method='cubic', fill_value=np.nan)
+fig = plot_profile(interpolated_data, 'temperature', 'gph', '1995-02-01', '12:00:00')
