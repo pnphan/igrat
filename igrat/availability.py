@@ -28,7 +28,7 @@ stations_df = igrat.read_station_locations()
 
 station_ids = list(stations_df['station_id'])
 
-def get_availability(station_id, download=True, download_dir=None, download_availability=True):
+def get_availability_json(station_id, download=True, download_dir=None, download_availability=True):
     """
     Get the availability of IGRA data for a given station.
     """
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     error_stations = []
     for i,station_id in enumerate(station_ids):
         try:
-            availability_data = get_availability(station_id, download_dir='availability')
+            availability_data = get_availability_json(station_id, download_dir='availability')
         except Exception as e:
             error_stations.append(station_id)
             print(f"Error processing station {station_id}: {e}")

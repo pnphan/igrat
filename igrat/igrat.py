@@ -1238,11 +1238,153 @@ def plot_station_map(color_by: str = 'none',
     
     fig.show()
 
+def get_availability_json(station_id, download_dir=None, download_availability=False):
+    """Get the availability of IGRA data for a given station.
+    
+    Parameters
+    ----------
+    station_id : str
+        The station ID to fetch availability data for
+    download_dir : Optional[str]
+        Directory to save availability data. If None, uses current directory with date
+    download_availability : bool, default=False
+        Whether to save the availability data to a JSON file
+
+    Returns
+    -------
+    Optional[Dict]
+        Dictionary containing availability data with keys:
+        - station_id: str
+        - raw_data: List[List[int]] of [year, month, day, hour]
+        - num_total_soundings: int
+        - available_years: List[int]
+        - num_soundings_per_year: Dict[int, int]
+        - num_months_per_year: Dict[int, int]
+        - num_days_per_year: Dict[int, int]
+        Returns None if there was an error fetching the data
+
+    Raises
+    ------
+    requests.exceptions.RequestException
+        If there was an error downloading the data
+    zipfile.BadZipFile
+        If the downloaded file is not a valid zip file
+    Exception
+        For any other unexpected errors during processing
+
+    Examples
+    --------
+    >>> # Get availability data for a station
+    >>> availability = get_availability_json('USM00072518')
+    >>> print(f"Station has {availability['num_total_soundings']} total soundings")
+    
+    >>> # Get and save availability data
+    >>> availability = get_availability_json('USM00072518', 
+    ...                                    download_dir='availability',
+    ...                                    download_availability=True)
+    """
+    availability = []
+    try:
+        base_url = "https://www.ncei.noaa.gov/data/integrated-global-radiosonde-archive/access/data-por/"
+        zip_filename = f"{station_id}-data.txt.zip"
+        zip_url = urljoin(base_url, zip_filename)
+        
+        try:
+            print(f"Downloading data for station {station_id}...")
+            response = requests.get(zip_url, stream=True)
+            response.raise_for_status()
+            
+            zip_buffer = io.BytesIO(response.content)
+            
+            print(f"Processing data for station {station_id}...")
+            with zipfile.ZipFile(zip_buffer) as zip_ref:
+                txt_file_name = None
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith('.txt'):
+                        txt_file_name = file_info.filename
+                        break
+                
+                if txt_file_name:
+                    with zip_ref.open(txt_file_name) as source:
+                        for line in source:
+                            line = line.decode('utf-8').strip()
+                            if line.startswith('#'):
+                                year = int(line[13:17])
+                                month = int(line[18:20])
+                                day = int(line[21:23])
+                                hour = int(line[24:26])
+                                availability.append([year, month, day, hour])
+                else:
+                    raise Exception("No text file found in the zip archive")
+            
+            print(f"Successfully processed data for {station_id}")
+        
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading data for station {station_id}: {e}")
+            return None
+        except zipfile.BadZipFile:
+            print(f"Error: The downloaded file for {station_id} is not a valid zip file.")
+            return None
+        except Exception as e:
+            print(f"Unexpected error processing data for {station_id}: {e}")
+            return None
+
+        availability_grid = np.array(availability)
+        years = np.unique(availability_grid[:, 0])
+
+        year_soundings = {}
+        for year, count in zip(np.unique(availability_grid[:, 0]), np.bincount(availability_grid[:, 0], minlength=int(np.max(availability_grid[:, 0])+1))[int(np.min(availability_grid[:, 0])):]):
+            year_soundings[int(year)] = int(count)
+
+        year_months = {}
+        for year in np.unique(availability_grid[:, 0]):
+            year_data = availability_grid[availability_grid[:, 0] == year]
+            unique_months = np.unique(year_data[:, 1])
+            month_count = len(unique_months)
+            year_months[int(year)] = int(month_count)
+
+        year_days = {}
+        for year in np.unique(availability_grid[:, 0]):
+            year_data = availability_grid[availability_grid[:, 0] == year]
+            day_of_year = year_data[:, 1] * 100 + year_data[:, 2]
+            unique_days = np.unique(day_of_year)
+            day_count = len(unique_days)
+            year_days[int(year)] = int(day_count)
+
+        availability_data = {
+            'station_id': station_id,
+            'raw_data': availability,
+            'num_total_soundings': len(availability),
+            'available_years': years.tolist(),
+            'num_soundings_per_year': year_soundings,
+            'num_months_per_year': year_months,
+            'num_days_per_year': year_days
+        }
+
+        if download_availability:
+            if download_dir is None:
+                download_dir = os.path.join(os.getcwd(), str(datetime.datetime.now().strftime("%Y-%m-%d")))
+
+            # Create the directory if it doesn't exist
+            if not os.path.exists(download_dir):
+                os.makedirs(download_dir)
+            availability_file = os.path.join(download_dir, f"{station_id}-availability.json")
+            with open(availability_file, 'w') as f:
+                json.dump(availability_data, f, indent=4)
+            print(f"Availability data saved to {availability_file}")
+            
+        return availability_data
+    
+    except Exception as e:
+        print(f"Error fetching availability for station {station_id}: {e}")
+        return None
+
 def filter_stations(start_year: Optional[int] = None, 
                      end_year: Optional[int] = None, 
                      lat_range: Optional[Tuple[float, float]] = None,
                      lon_range: Optional[Tuple[float, float]] = None,
-                     has_date_range: Optional[Tuple[str, str]] = None) -> List[str]:
+                     has_date_range: Optional[Tuple[str, str]] = None,
+                     availability_dir: Optional[str] = None) -> List[str]:
     """Filter station data by year, latitude, and longitude range.
     
     Parameters
@@ -1257,6 +1399,9 @@ def filter_stations(start_year: Optional[int] = None,
         Range of longitudes to include (min_lon, max_lon)
     has_date_range : Optional[Tuple[str, str]]
         Contains records between start_date and end_date
+    availability_dir : Optional[str]
+        Directory containing availability data
+
     Returns
     -------
     List[str]
@@ -1318,12 +1463,12 @@ def filter_stations(start_year: Optional[int] = None,
         start_date = datetime.datetime.strptime(has_date_range[0], '%Y-%m-%d')
         end_date = datetime.datetime.strptime(has_date_range[1], '%Y-%m-%d')
         for station_id in stations_list[:]:  # Create a copy of the list to safely modify during iteration
-            availability_file = os.path.join('availability', f"{station_id}-availability.json")
-            if not os.path.exists(availability_file):
-                raise FileNotFoundError(f"Availability file not found for station {station_id}: {availability_file}")
-                
-            with open(availability_file, 'r') as f:
-                availability_data = json.load(f)
+            if availability_dir is None:
+                availability_data = get_availability_json(station_id)
+            else:
+                availability_file = os.path.join(availability_dir, f"{station_id}-availability.json")
+                with open(availability_file, 'r') as f:
+                    availability_data = json.load(f)
                 
             # Check if station has data in the specified date range
             has_data = False
@@ -2189,8 +2334,45 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
     
+def get_availability_json_batch(directory: str, station_list: Optional[List[str]] = None):
+    """Download availability data for all stations or a list of stations.
+    
+    Parameters
+    ----------
+    directory : str
+        Directory to save availability data
+    station_list : Optional[List[str]]
+        List of station IDs to process. If None, processes all stations in the IGRA database
 
+    Returns
+    -------
+    None
 
-data = read_station_data("USM00072435", file_type="df", start_date="1988-12-20", end_date="2025-01-01")
+    Raises
+    ------
+    Exception
+        For any unexpected errors during processing
 
-print(data.head())
+    Examples
+    --------
+    >>> # Download availability data for all stations
+    >>> download_availability('availability')
+    
+    >>> # Download availability data for specific stations
+    >>> download_availability('availability', ['USM00072518', 'USM00072456'])
+    """
+    if station_list is None:
+        stations_df = read_station_locations(save_file=False)
+        station_list = list(stations_df['station_id'])
+        
+    error_stations = []
+    for i,station_id in enumerate(station_list):
+        try:
+            availability_data = get_availability_json(station_id, download_dir=directory, download_availability=True)
+        except Exception as e:
+            error_stations.append(station_id)
+            print(f"Error processing station {station_id}: {e}")
+            continue
+        print(f"Station {i+1} of {len(station_list)}: {station_id} has {availability_data['num_total_soundings']} soundings")
+
+    print(f"Error processing {len(error_stations)} stations: {error_stations}")
