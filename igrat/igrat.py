@@ -117,9 +117,8 @@ def read_station_data(station_id: str,
                       path: Optional[str] = None,
                       main: bool = True,
                       download_dir: Optional[str] = None,
-                     start_date: Optional[str] = None,  # Changed from datetime to str
-                     end_date: Optional[str] = None,    # Changed from datetime to str
-                     file_type: Optional[str] = 'netcdf') -> Union[pd.DataFrame, xr.Dataset]:
+                     file_type: Optional[str] = 'netcdf',
+                     file_name: Optional[str] = None) -> Union[pd.DataFrame, xr.Dataset]:
     """
     Read and parse a single station's IGRA data file.
     
@@ -128,10 +127,8 @@ def read_station_data(station_id: str,
         path: Optional path to the station's data file
         main: Whether to include only main variables (True) or all variables (False)
         download_dir: Directory to save the output file 
-        start_date: Optional start date in YYYYMMDD format
-        end_date: Optional end date in YYYYMMDD format
         file_type: Optional file type to return, either 'netcdf', 'pandas', or 'df'
-        
+        file_name: Optional name of the output file
     Returns:
         If file_type is 'netcdf':
             xarray.Dataset containing sounding data with dimensions:
@@ -173,8 +170,6 @@ def read_station_data(station_id: str,
         
         >>> # Read data with date filtering and all variables
         >>> df = read_station_data(station, 
-        ...                       start_date='20200101',
-        ...                       end_date='20200131',
         ...                       main=False,
         ...                       file_type='df')
         >>> print(df.columns)
@@ -191,16 +186,19 @@ def read_station_data(station_id: str,
         elif not os.path.exists(download_dir):
             os.makedirs(download_dir)
 
+        if file_name is None:
+            file_name = station_id
+
         if file_type.lower() in ['netcdf', 'nc']:
             if main:
-                output_file = os.path.join(download_dir, f"{station_id}-main.nc")
+                output_file = os.path.join(download_dir, f"{file_name}-main.nc")
             else:
-                output_file = os.path.join(download_dir, f"{station_id}-full.nc")
+                output_file = os.path.join(download_dir, f"{file_name}-full.nc")
         else:  # pandas/df
             if main:
-                output_file = os.path.join(download_dir, f"{station_id}-main.csv")
+                output_file = os.path.join(download_dir, f"{file_name}-main.csv")
             else:
-                output_file = os.path.join(download_dir, f"{station_id}-full.csv")
+                output_file = os.path.join(download_dir, f"{file_name}-full.csv")
 
         if path is None:
             base_url = metadata.IGRA_FILES_URL
@@ -602,12 +600,6 @@ def read_station_data(station_id: str,
             # Create DataFrame
             df = pd.DataFrame(data)
             
-            # Filter by date if specified
-            if start_date is not None:
-                df = df[df['date'] >= start_date]
-            if end_date is not None:
-                df = df[df['date'] <= end_date]
-            
             # Save to CSV
             df.to_csv(output_file, index=False)
             print(f"Successfully saved DataFrame to: {output_file}")
@@ -806,61 +798,59 @@ def load_data(file_path: Union[str, Path], print_info: bool = True) -> Union[pd.
     else:
         raise ValueError(f"Unsupported file format: {file_path.suffix}")
     
-def filter_by_date_range(df: pd.DataFrame, 
-                         start_date: str, 
-                         end_date: str, 
-                         file_type: Optional[str] = 'df') -> pd.DataFrame:
+def filter_by_date_range(df: Union[pd.DataFrame, xr.Dataset], 
+                         start_date: int, 
+                         end_date: int) -> Union[pd.DataFrame, xr.Dataset]:
     """Filter the data by date range.
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : Union[pd.DataFrame, xr.Dataset]
         Sounding data with 'date' column in YYYYMMDD format.
-    start_date : str
+    start_date : int
         Start date in YYYYMMDD format.
-    end_date : str
+    end_date : int
         End date in YYYYMMDD format.
-    file_type : str, optional
-        Type of file to filter ('df' for DataFrame or 'nc' for NetCDF), by default 'df'
 
     Returns
     -------
-    pd.DataFrame
-        Filtered DataFrame containing only data between start_date and end_date (inclusive).
+    Union[pd.DataFrame, xr.Dataset]
+        Filtered data containing only data between start_date and end_date (inclusive).
 
     Examples
     --------
     >>> # Filter data for January 2020
-    >>> df = read_station_data("USM00072520", file_type='df')
-    >>> filtered_df = filter_by_date_range(df, "20200101", "20200131")
-    >>> print(filtered_df['date'].min(), filtered_df['date'].max())
-    20200101 20200131
+    >>> filtered_data = filter_by_date_range(data, 20200101, 20200131)
     """
-    if file_type == 'df':
-        if not isinstance(df, pd.DataFrame):
-            raise TypeError(f"Expected pandas DataFrame, got {type(df).__name__}")
+    if df is None:
+        print("Error: No data provided")
+        return None
         
-        # Filter the DataFrame
-        mask = (df['date'] >= start_date) & (df['date'] <= end_date)
-        filtered_df = df[mask].copy()
-        
-        return filtered_df
-    
-    elif file_type == 'nc':
-        if not isinstance(df, xr.Dataset):
-            raise TypeError(f"Expected xarray Dataset, got {type(df).__name__}")
+    try:
+        if isinstance(df, pd.DataFrame):
+            # Filter the DataFrame
+            filtered_df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
+            if len(filtered_df) == 0:
+                print(f"Warning: No data found between {start_date} and {end_date}")
+            return filtered_df
             
-        # Find indices of first and last soundings within date range
-        start_idx = np.where(df['date'].values >= start_date)[0][0]
-        end_idx = np.where(df['date'].values <= end_date)[0][-1]
-        
-        # Filter the Dataset using indices
-        filtered_ds = df.isel(num_profiles=slice(start_idx, end_idx + 1))
-        
-        return filtered_ds
-    
-    else:
-        raise ValueError("file_type must be either 'df' or 'nc'")
+        elif isinstance(df, xr.Dataset):
+            # Find indices of dates within range
+            date_mask = (df['date'].values >= start_date) & (df['date'].values <= end_date)
+            if not np.any(date_mask):
+                print(f"Warning: No data found between {start_date} and {end_date}")
+                return None
+                
+            # Filter the Dataset using the mask
+            filtered_ds = df.isel(num_profiles=date_mask)
+            return filtered_ds
+            
+        else:
+            raise TypeError(f"Expected pandas DataFrame or xarray Dataset, got {type(df).__name__}")
+            
+    except Exception as e:
+        print(f"Error filtering data: {e}")
+        return None
 
 def filter_variables(df: pd.DataFrame, 
                     variables: List[str], 
@@ -1344,7 +1334,7 @@ def filter_stations(start_year: Optional[int] = None,
         Range of latitudes to include (min_lat, max_lat)
     lon_range : Optional[Tuple[float, float]]
         Range of longitudes to include (min_lon, max_lon)
-    has_date_range : Optional[Tuple[str, str]]
+    has_date_range : Optional[Tuple[int, int]]
         Contains records between start_date and end_date
     availability_dir : Optional[str]
         Directory containing availability data
@@ -1707,9 +1697,9 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
         - netCDF4 Dataset
     variable : str
         Name of the variable to interpolate (e.g., 'temperature' or 'wind_speed')
-    start_date : Optional[int], optional
+    start_date : Optional[int]
         Start date for filtering data, by default None
-    end_date : Optional[int], optional
+    end_date : Optional[int]
         End date for filtering data, by default None
     fill_value : Optional[float], optional
         Value to use for extrapolation, by default None
@@ -2486,55 +2476,6 @@ def convert_to_df(data: Union[pd.DataFrame, xr.Dataset], name: str):
     else:
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
-
-def print_dataset_info(data: Union[xr.Dataset, nc.Dataset], detailed: bool = False) -> None:
-    """Print information about a netCDF dataset.
-    
-    Parameters
-    ----------
-    data : Union[xr.Dataset, nc.Dataset]
-        The dataset to print information about
-    detailed : bool, optional
-        Whether to print detailed information, by default False
-        
-    Examples
-    --------
-    >>> # Print basic information
-    >>> print_dataset_info(dataset)
-    >>> # Print detailed information
-    >>> print_dataset_info(dataset, detailed=True)
-    """
-    if isinstance(data, nc.Dataset):
-        # Convert netCDF4 Dataset to xarray Dataset
-        data = xr.Dataset.from_dict(data.variables)
-    
-    print("\n=== Dataset Overview ===")
-    print(data)
-    
-    if detailed:
-        print("\n=== Detailed Information ===")
-        print(data.info())
-        
-        print("\n=== Statistical Information ===")
-        print(data.describe())
-        
-        print("\n=== Dimensions ===")
-        for dim, size in data.dims.items():
-            print(f"{dim}: {size}")
-            
-        print("\n=== Coordinates ===")
-        for coord in data.coords:
-            print(f"\n{coord}:")
-            print(data[coord])
-            
-        print("\n=== Variables ===")
-        for var in data.data_vars:
-            print(f"\n{var}:")
-            print(data[var])
-            
-        print("\n=== Attributes ===")
-        for attr, value in data.attrs.items():
-            print(f"{attr}: {value}")
 
 #### DATE FORMAT YYYYMMDD
 #### TIME FORMAT HH
