@@ -117,8 +117,8 @@ def read_station_data(station_id: str,
                       path: Optional[str] = None,
                       main: bool = True,
                       download_dir: Optional[str] = None,
-                     start_date: Optional[datetime.datetime] = None,
-                     end_date: Optional[datetime.datetime] = None, 
+                     start_date: Optional[str] = None,  # Changed from datetime to str
+                     end_date: Optional[str] = None,    # Changed from datetime to str
                      file_type: Optional[str] = 'netcdf') -> Union[pd.DataFrame, xr.Dataset]:
     """
     Read and parse a single station's IGRA data file.
@@ -128,8 +128,8 @@ def read_station_data(station_id: str,
         path: Optional path to the station's data file
         main: Whether to include only main variables (True) or all variables (False)
         download_dir: Directory to save the output file 
-        start_date: Optional start date to filter data
-        end_date: Optional end date to filter data
+        start_date: Optional start date in YYYY-MM-DD format
+        end_date: Optional end date in YYYY-MM-DD format
         file_type: Optional file type to return, either 'netcdf', 'pandas', or 'df'
         
     Returns:
@@ -172,11 +172,9 @@ def read_station_data(station_id: str,
          'wind_direction', 'wind_speed', 'dewpoint_depression']
         
         >>> # Read data with date filtering and all variables
-        >>> start = datetime.datetime(2020, 1, 1)
-        >>> end = datetime.datetime(2020, 1, 31)
         >>> df = read_station_data(station, 
-        ...                       start_date=start,
-        ...                       end_date=end,
+        ...                       start_date='2020-01-01',
+        ...                       end_date='2020-01-31',
         ...                       main=False,
         ...                       file_type='df')
         >>> print(df.columns)
@@ -187,6 +185,19 @@ def read_station_data(station_id: str,
     """
 
     try:
+        # Convert string dates to datetime objects if provided
+        if start_date is not None:
+            try:
+                start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+            except ValueError as e:
+                raise ValueError(f"Invalid start_date format. Expected YYYY-MM-DD, got {start_date}. Error: {e}")
+        
+        if end_date is not None:
+            try:
+                end_date = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+            except ValueError as e:
+                raise ValueError(f"Invalid end_date format. Expected YYYY-MM-DD, got {end_date}. Error: {e}")
+
         # Set up the output file path
         if download_dir is None:
             download_dir = os.getcwd()
@@ -431,6 +442,9 @@ def read_station_data(station_id: str,
                     # Skip malformed lines
                     continue
 
+
+        stations_df = read_station_locations(save_file=False)
+
         # Create the NetCDF file
         if file_type.lower() in ['netcdf', 'nc']:
             with nc.Dataset(output_file, 'w', format='NETCDF4') as ncfile:
@@ -503,6 +517,16 @@ def read_station_data(station_id: str,
                 ncfile.history = f'Created {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
                 ncfile.source = f'IGRA v2 data for {station_id}'
 
+                # Get station location information
+                try:
+                    station_info = stations_df[stations_df['station_id'] == station_id].iloc[0]
+                    ncfile.latitude = float(station_info['latitude'])
+                    ncfile.longitude = float(station_info['longitude'])
+                    ncfile.station_name = station_info['name']
+                    ncfile.elevation = float(station_info['elevation'])
+                except Exception as e:
+                    print(f"Warning: Could not retrieve station location information: {e}")
+
                 # Write data
                 if main:
                     date_var[:] = dates
@@ -572,6 +596,16 @@ def read_station_data(station_id: str,
                         dt = datetime.datetime(1900, 1, 1, 23, 59)
                         datetimes.append(dt)
             
+            # Get station location information
+            try:
+                station_info = stations_df[stations_df['station_id'] == station_id].iloc[0]
+                station_lat = float(station_info['latitude'])
+                station_lon = float(station_info['longitude'])
+            except Exception as e:
+                print(f"Warning: Could not retrieve station location information: {e}")
+                station_lat = np.nan
+                station_lon = np.nan
+            
             # For each sounding
             for i in range(sounding_count):
                 # For each level in the sounding
@@ -590,7 +624,9 @@ def read_station_data(station_id: str,
                         'relative_humidity': rh[i, j],
                         'wind_direction': wdir[i, j],
                         'wind_speed': wspd[i, j],
-                        'dewpoint_depression': dpdp[i, j]
+                        'dewpoint_depression': dpdp[i, j],
+                        'latitude': station_lat,
+                        'longitude': station_lon
                     }
                     
                     if not main:
@@ -610,9 +646,9 @@ def read_station_data(station_id: str,
             
             # Filter by date if specified
             if start_date is not None:
-                df = df[df['datetime'] >= start_date]
+                df = df[df['date'].apply(lambda x: datetime.datetime.combine(x, datetime.time.min)) >= start_date]
             if end_date is not None:
-                df = df[df['datetime'] <= end_date]
+                df = df[df['date'].apply(lambda x: datetime.datetime.combine(x, datetime.time.min)) <= end_date]
             
             # Save to CSV
             df.to_csv(output_file, index=False)
@@ -1003,7 +1039,7 @@ def read_station_locations(save_file: bool = True, start_year: int = 1900, end_y
     
     try:
         # Download the station list
-        print("Downloading IGRA station list...")
+        # print("Downloading IGRA station list...")
         response = requests.get(metadata.IGRA_STATION_LIST_URL)
         response.raise_for_status()
         
@@ -1042,7 +1078,7 @@ def read_station_locations(save_file: bool = True, start_year: int = 1900, end_y
         numeric_cols = ['latitude', 'longitude', 'elevation', 'first_year', 'last_year', 'nobs']
         df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
         
-        print(f"Successfully parsed {len(df)} stations")
+        # print(f"Successfully parsed {len(df)} stations")
         
         # Save to CSV if requested
         if save_file:
@@ -1063,7 +1099,8 @@ def plot_station_map(color_by: str = 'none',
                      start_year: int = 1900, 
                      end_year: int = 2025, 
                      lat_range: Tuple[float, float] = (-90, 90),
-                     lon_range: Tuple[float, float] = (-180, 180)):
+                     lon_range: Tuple[float, float] = (-180, 180), 
+                     stations: Optional[List[str]] = None):
     """
     Displays an interactive map of IGRA stations using Plotly.
     
@@ -1084,7 +1121,8 @@ def plot_station_map(color_by: str = 'none',
         Range of latitudes to display (min_lat, max_lat), by default (-90, 90)
     lon_range : Tuple[float, float], optional
         Range of longitudes to display (min_lon, max_lon), by default (-180, 180)
-
+    stations : List[str], optional
+        List of station IDs to display on the map, by default None
     Examples
     --------
     >>> # Display the map colored by elevation (default)
@@ -1115,6 +1153,9 @@ def plot_station_map(color_by: str = 'none',
         (stations_df['longitude'] >= lon_range[0]) &
         (stations_df['longitude'] <= lon_range[1])
     ]
+
+    if stations is not None:
+        stations_df = stations_df[stations_df['station_id'].isin(stations)]
 
     if color_by == 'none':
         fig = px.scatter_geo(
@@ -1197,27 +1238,34 @@ def plot_station_map(color_by: str = 'none',
     
     fig.show()
 
-def filter_stations(start_year: int = 1900, 
-                     end_year: int = 2025, 
-                     lat_range: Tuple[float, float] = (-1000, 1000),
-                     lon_range: Tuple[float, float] = (-1000, 1000)) -> List[str]:
+def filter_stations(start_year: Optional[int] = None, 
+                     end_year: Optional[int] = None, 
+                     lat_range: Optional[Tuple[float, float]] = None,
+                     lon_range: Optional[Tuple[float, float]] = None,
+                     has_date_range: Optional[Tuple[str, str]] = None) -> List[str]:
     """Filter station data by year, latitude, and longitude range.
     
     Parameters
     ----------
-    start_year : int, optional
-        First year of data availability to include, by default 1900
-    end_year : int, optional
-        Last year of data availability to include, by default 2025
-    lat_range : Tuple[float, float], optional
-        Range of latitudes to include (min_lat, max_lat), by default (-90, 90)
-    lon_range : Tuple[float, float], optional
-        Range of longitudes to include (min_lon, max_lon), by default (-180, 180)
-        
+    start_year : Optional[int]
+        First year of data availability to include
+    end_year : Optional[int]
+        Last year of data availability to include
+    lat_range : Optional[Tuple[float, float]]
+        Range of latitudes to include (min_lat, max_lat)
+    lon_range : Optional[Tuple[float, float]]
+        Range of longitudes to include (min_lon, max_lon)
+    has_date_range : Optional[Tuple[str, str]]
+        Contains records between start_date and end_date
     Returns
     -------
     List[str]
         List of station IDs that meet the filtering criteria
+        
+    Raises
+    ------
+    ValueError
+        If no filtering criteria are provided
         
     Examples
     --------
@@ -1240,23 +1288,57 @@ def filter_stations(start_year: int = 1900,
     ... )
     >>> print(f"Found {len(ny_stations)} stations in the New York area")
     """
+    if all(param is None for param in [start_year, end_year, lat_range, lon_range]):
+        raise ValueError("At least one filtering criterion must be provided")
+        
     stations_df = read_station_locations(save_file=False)
     
-    # Filter stations by year range
-    stations_df = stations_df[
-        (stations_df['first_year'] >= start_year) & 
-        (stations_df['last_year'] <= end_year)
-    ]
+    # Filter stations by year range if provided
+    if start_year is not None or end_year is not None:
+        if start_year is not None:
+            stations_df = stations_df[stations_df['first_year'] >= start_year]
+        if end_year is not None:
+            stations_df = stations_df[stations_df['last_year'] <= end_year]
     
-    # Filter stations by latitude and longitude range
-    stations_df = stations_df[
-        (stations_df['latitude'] >= lat_range[0]) &
-        (stations_df['latitude'] <= lat_range[1]) &
-        (stations_df['longitude'] >= lon_range[0]) &
-        (stations_df['longitude'] <= lon_range[1])
-    ]
+    # Filter stations by latitude and longitude range if provided
+    if lat_range is not None:
+        stations_df = stations_df[
+            (stations_df['latitude'] >= lat_range[0]) &
+            (stations_df['latitude'] <= lat_range[1])
+        ]
+    if lon_range is not None:
+        stations_df = stations_df[
+            (stations_df['longitude'] >= lon_range[0]) &
+            (stations_df['longitude'] <= lon_range[1])
+        ]
 
-    return stations_df['station_id'].tolist()
+    stations_list = stations_df['station_id'].tolist()
+    
+    if has_date_range is not None:
+        start_date = datetime.datetime.strptime(has_date_range[0], '%Y-%m-%d')
+        end_date = datetime.datetime.strptime(has_date_range[1], '%Y-%m-%d')
+        for station_id in stations_list[:]:  # Create a copy of the list to safely modify during iteration
+            availability_file = os.path.join('availability', f"{station_id}-availability.json")
+            if not os.path.exists(availability_file):
+                raise FileNotFoundError(f"Availability file not found for station {station_id}: {availability_file}")
+                
+            with open(availability_file, 'r') as f:
+                availability_data = json.load(f)
+                
+            # Check if station has data in the specified date range
+            has_data = False
+            for year, month, day, hour in availability_data['raw_data']:
+                # Convert to datetime for easier comparison
+                current_date = datetime.datetime(year, month, day)
+                
+                if start_date <= current_date <= end_date:
+                    has_data = True
+                    break
+                    
+            if not has_data:
+                stations_list.remove(station_id)
+
+    return stations_list
 
 def _filter_invalid_values(x: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Filter out invalid values from paired arrays.
@@ -2106,5 +2188,9 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
     else:
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
+    
 
 
+data = read_station_data("USM00072435", file_type="df", start_date="1988-12-20", end_date="2025-01-01")
+
+print(data.head())
