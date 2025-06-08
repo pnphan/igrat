@@ -81,11 +81,6 @@ source venv/bin/activate  # On Windows, use: venv\Scripts\activate
 pip install -e .
 ```
 
-Or install directly from PyPI:
-```bash
-pip install igrat
-```
-
 ### Optional Dependencies
 For additional functionality, you may want to install:
 - jupyter (for interactive notebooks)
