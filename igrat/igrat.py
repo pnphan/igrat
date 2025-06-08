@@ -32,6 +32,7 @@ from matplotlib.widgets import Button
 import json
 from scipy import interpolate
 import datetime
+import tempfile
 
 def download_station_file(station_id: str, output_dir: Optional[str] = None) -> Optional[str]:
     """
@@ -116,6 +117,7 @@ def download_station_file(station_id: str, output_dir: Optional[str] = None) -> 
 def read_station_data(station_id: str, 
                       path: Optional[str] = None,
                       main: bool = True,
+                      download: bool = True,
                       download_dir: Optional[str] = None,
                      file_type: Optional[str] = 'netcdf',
                      file_name: Optional[str] = None) -> Union[pd.DataFrame, xr.Dataset]:
@@ -126,6 +128,7 @@ def read_station_data(station_id: str,
         station_id: Station ID (e.g., "USM00072520" for Albany, NY)
         path: Optional path to the station's data file
         main: Whether to include only main variables (True) or all variables (False)
+        download: Whether to save the data to a file or just return the data
         download_dir: Directory to save the output file 
         file_type: Optional file type to return, either 'netcdf', 'pandas', or 'df'
         file_name: Optional name of the output file
@@ -135,7 +138,7 @@ def read_station_data(station_id: str,
             - num_profiles: Number of soundings
             - levels: Number of levels in each sounding
             - variables: Pressure, height, temperature, dewpoint, wind_direction, wind_speed, relative_humidity
-            Data is saved as a netcdf file. 
+            Data is saved as a netcdf file if download=True. 
             
         If file_type is 'pandas' or 'df':
             DataFrame containing sounding data with columns:
@@ -153,7 +156,7 @@ def read_station_data(station_id: str,
             - pressure_flag: Pressure flag (if main=False)
             - height_flag: Height flag (if main=False)
             - temperature_flag: Temperature flag (if main=False)
-            Data is saved as a csv file. 
+            Data is saved as a csv file if download=True.
 
     Examples:
         >>> # Read data for a single station and return as NetCDF
@@ -432,6 +435,14 @@ def read_station_data(station_id: str,
 
         # Create the NetCDF file
         if file_type.lower() in ['netcdf', 'nc']:
+            # Create a temporary file if not downloading
+            if not download:
+                temp_file = tempfile.NamedTemporaryFile(suffix='.nc', delete=False)
+                output_file = temp_file.name
+                temp_file.close()
+            else:
+                output_file = os.path.join(download_dir, f"{file_name}-main.nc" if main else f"{file_name}-full.nc")
+
             with nc.Dataset(output_file, 'w', format='NETCDF4') as ncfile:
                 # Create dimensions
                 ncfile.createDimension('num_profiles', sounding_count)
@@ -546,6 +557,11 @@ def read_station_data(station_id: str,
             
             print(f"Successfully created NetCDF file: {output_file}")
             ds = xr.open_dataset(output_file)
+            
+            # Delete temporary file if not downloading
+            if not download:
+                os.unlink(output_file)
+                
             return ds
         
         elif file_type.lower() in ['pandas', 'df']:
@@ -600,9 +616,10 @@ def read_station_data(station_id: str,
             # Create DataFrame
             df = pd.DataFrame(data)
             
-            # Save to CSV
-            df.to_csv(output_file, index=False)
-            print(f"Successfully saved DataFrame to: {output_file}")
+            # Save to CSV only if download=True
+            if download:
+                df.to_csv(output_file, index=False)
+                print(f"Successfully saved DataFrame to: {output_file}")
             
             return df
         
@@ -1032,7 +1049,7 @@ def read_station_locations(save_file: bool = True, start_year: int = 1900, end_y
         print(f"Unexpected error processing station list: {e}")
         return pd.DataFrame()
 
-def plot_station_map(color_by: str = 'none', 
+def plot_station_map(colour_by: str = 'none', 
                      start_year: int = 1900, 
                      end_year: int = 2025, 
                      lat_range: Tuple[float, float] = (-90, 90),
@@ -1043,9 +1060,9 @@ def plot_station_map(color_by: str = 'none',
     
     Parameters
     ----------
-    color_by : str, optional
-        Variable to use for coloring the stations. Options are:
-        - 'none': No coloring (default)
+    colour_by : str, optional
+        Variable to use for colouring the stations. Options are:
+        - 'none': No colouring (default)
         - 'elevation': Color stations by their elevation
         - 'last_year': Color stations by their last year of data
         - 'first_year': Color stations by their first year of data
@@ -1066,10 +1083,10 @@ def plot_station_map(color_by: str = 'none',
     >>> plot_station_map()
     
     >>> # Display the map colored by last year of data
-    >>> plot_station_map(color_by='last_year')
+    >>> plot_station_map(colour_by='last_year')
     
     >>> # Display the map colored by number of observations
-    >>> plot_station_map(color_by='nobs')
+    >>> plot_station_map(colour_by='nobs')
     
     >>> # Display stations in a specific region
     >>> plot_station_map(lat_range=(30, 50), lon_range=(-130, -70))  # North America
@@ -1094,7 +1111,7 @@ def plot_station_map(color_by: str = 'none',
     if stations is not None:
         stations_df = stations_df[stations_df['station_id'].isin(stations)]
 
-    if color_by == 'none':
+    if colour_by == 'none':
         fig = px.scatter_geo(
             stations_df,
             lat='latitude',
@@ -1105,7 +1122,7 @@ def plot_station_map(color_by: str = 'none',
         )
         fig.update_traces(marker=dict(size=6, color='blue'))
     else:
-        # Set up color mapping based on color_by parameter
+        # Set up color mapping based on colour_by parameter
         color_mapping = {
             'elevation': {
                 'data': stations_df['elevation'],
@@ -1129,11 +1146,11 @@ def plot_station_map(color_by: str = 'none',
             }
         }
 
-        if color_by not in color_mapping:
-            raise ValueError(f"color_by must be one of {list(color_mapping.keys())}")
+        if colour_by not in color_mapping:
+            raise ValueError(f"colour_by must be one of {list(color_mapping.keys())}")
 
         # Get the color mapping for the selected variable
-        color_info = color_mapping[color_by]
+        color_info = color_mapping[colour_by]
 
         # Create the figure
         fig = px.scatter_geo(
@@ -1170,6 +1187,10 @@ def plot_station_map(color_by: str = 'none',
             projection=dict(
                 type='natural earth'
             )
+        ),
+        coloraxis_colorbar=dict(
+            title_font_size=36,
+            tickfont_size=24
         )
     )
     
@@ -2479,3 +2500,5 @@ def convert_to_df(data: Union[pd.DataFrame, xr.Dataset], name: str):
 
 #### DATE FORMAT YYYYMMDD
 #### TIME FORMAT HH
+
+
