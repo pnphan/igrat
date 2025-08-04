@@ -1050,11 +1050,11 @@ def read_station_locations(save_file: bool = True, start_year: int = 1900, end_y
         return pd.DataFrame()
 
 def plot_station_map(colour_by: str = 'none', 
-                     start_year: int = 1900, 
-                     end_year: int = 2025, 
+                     year_range: Tuple[int, int] = (1900, 2025),
                      lat_range: Tuple[float, float] = (-90, 90),
                      lon_range: Tuple[float, float] = (-180, 180), 
-                     stations: Optional[List[str]] = None):
+                     stations: Optional[List[str]] = None,
+                     last_updated_year: Optional[int] = None):
     """
     Displays an interactive map of IGRA stations using Plotly.
     
@@ -1067,16 +1067,16 @@ def plot_station_map(colour_by: str = 'none',
         - 'last_year': Color stations by their last year of data
         - 'first_year': Color stations by their first year of data
         - 'nobs': Color stations by number of observations
-    start_year : int, optional
-        First year of data availability to include in the map, by default 1900
-    end_year : int, optional
-        Last year of data availability to include in the map, by default 2025
+    year_range : Tuple[int, int], optional
+        Range of years to include in the map, by default (1900, 2025)
     lat_range : Tuple[float, float], optional
         Range of latitudes to display (min_lat, max_lat), by default (-90, 90)
     lon_range : Tuple[float, float], optional
         Range of longitudes to display (min_lon, max_lon), by default (-180, 180)
     stations : List[str], optional
         List of station IDs to display on the map, by default None
+    last_updated_year : Optional[int], optional
+        Last year of data availability to include in the map, by default None i.e., all stations with data availability from 1900 onwards
     Examples
     --------
     >>> # Display the map colored by elevation (default)
@@ -1096,9 +1096,12 @@ def plot_station_map(colour_by: str = 'none',
     
     # Filter stations by year range
     stations_df = stations_df[
-        (stations_df['first_year'] >= start_year) & 
-        (stations_df['last_year'] <= end_year)
+        (stations_df['first_year'] >= year_range[0]) & 
+        (stations_df['last_year'] <= year_range[1])
     ]
+
+    if last_updated_year is not None:
+        stations_df = stations_df[stations_df['last_year'] >= last_updated_year]
     
     # Filter stations by latitude and longitude range
     stations_df = stations_df[
