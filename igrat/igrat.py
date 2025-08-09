@@ -2308,7 +2308,7 @@ def convert_to_df(data: Union[pd.DataFrame, xr.Dataset], name: str):
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
     
-def compute_potential_temperature(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset]) -> Union[pd.DataFrame, xr.Dataset]:
+def compute_potential_temp(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset]) -> Union[pd.DataFrame, xr.Dataset]:
     """Compute potential temperature for every observation in the data.
     
     Potential temperature is calculated using the formula:
