@@ -55,39 +55,30 @@ def download_station_file(station_id: str, output_dir: Optional[str] = None) -> 
         if output_dir is None:
             output_dir = os.getcwd()
             
-        # Create the output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        # Construct the URL for the station's zip file
         base_url = metadata.IGRA_FILES_URL
         zip_filename = f"{station_id}-data.txt.zip"
         zip_url = urljoin(base_url, zip_filename)
         
-        # Download the zip file directly to memory
         print(f"Downloading data for station {station_id}...")
         response = requests.get(zip_url, stream=True)
         response.raise_for_status()
         
-        # Get the total file size
         total_size = int(response.headers.get('content-length', 0))
         
-        # Create a BytesIO object to hold the zip file in memory
         zip_buffer = io.BytesIO()
         
-        # Download with progress bar
         with tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"Downloading {station_id}") as pbar:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     zip_buffer.write(chunk)
                     pbar.update(len(chunk))
         
-        # Reset buffer position
         zip_buffer.seek(0)
         
-        # Extract the text file
         print(f"Extracting data for station {station_id}...")
         with zipfile.ZipFile(zip_buffer) as zip_ref:
-            # Get the name of the text file in the zip
             txt_file_name = None
             for file_info in zip_ref.infolist():
                 if file_info.filename.endswith('.txt'):
@@ -95,7 +86,6 @@ def download_station_file(station_id: str, output_dir: Optional[str] = None) -> 
                     break
             
             if txt_file_name:
-                # Extract the text file to the output directory
                 output_path = os.path.join(output_dir, txt_file_name)
                 with zip_ref.open(txt_file_name) as txt_file, open(output_path, 'wb') as out_file:
                     shutil.copyfileobj(txt_file, out_file)
@@ -206,36 +196,28 @@ def read_station_data(station_id: str,
         if path is None:
             base_url = metadata.IGRA_FILES_URL
 
-            # Construct the URL for the station's zip file
             zip_filename = f"{station_id}-data.txt.zip"
             zip_url = urljoin(base_url, zip_filename)
             
             try:
-                # Download the zip file directly to memory
                 print(f"Downloading data for station {station_id}...")
                 response = requests.get(zip_url, stream=True)
                 response.raise_for_status()
                 
-                # Get the total file size
                 total_size = int(response.headers.get('content-length', 0))
                 
-                # Create a BytesIO object to hold the zip file in memory
                 zip_buffer = io.BytesIO()
                 
-                # Download with progress bar
                 with tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"Downloading {station_id}") as pbar:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             zip_buffer.write(chunk)
                             pbar.update(len(chunk))
                 
-                # Reset buffer position
                 zip_buffer.seek(0)
                 
-                # Extract the text file directly to memory
                 print(f"Extracting data for station {station_id}...")
                 with zipfile.ZipFile(zip_buffer) as zip_ref:
-                    # Get the name of the text file in the zip
                     txt_file_name = None
                     for file_info in zip_ref.infolist():
                         if file_info.filename.endswith('.txt'):
@@ -243,7 +225,6 @@ def read_station_data(station_id: str,
                             break
                     
                     if txt_file_name:
-                        # Read the text file directly into memory
                         with zip_ref.open(txt_file_name) as txt_file:
                             data_content = txt_file.read().decode('utf-8')
                     else:
@@ -261,14 +242,11 @@ def read_station_data(station_id: str,
                 print(f"Unexpected error processing data for {station_id}: {e}")
                 return None
         else:
-            # Read from local file
             with open(path, 'r') as f:
                 data_content = f.read()
 
-        # Process the data from memory
         lines = data_content.splitlines()
         
-        # First pass: count soundings and find max levels
         sounding_count = 0
         max_levels = 0
         current_levels = 0
@@ -283,13 +261,11 @@ def read_station_data(station_id: str,
             else:
                 current_levels += 1
         
-        # Check the last sounding
         if current_levels > max_levels:
             max_levels = current_levels
         
         print(f"Found {sounding_count} soundings with maximum {max_levels} levels")
         
-        # Create arrays to store data
         dates = np.zeros(sounding_count, dtype=np.int32)
         times = np.zeros(sounding_count, dtype=np.int32)
         reltimes = []
@@ -311,7 +287,6 @@ def read_station_data(station_id: str,
         tflag = np.full((sounding_count, max_levels), np.nan)
         dpdp = np.full((sounding_count, max_levels), np.nan)
         
-        # Second pass: read data
         sounding_idx = -1
         level_idx = 0
         
@@ -322,7 +297,6 @@ def read_station_data(station_id: str,
                 sounding_idx += 1
                 level_idx = 0
                 
-                # Parse header
                 year = int(line[13:17])
                 month = int(line[18:20])
                 day = int(line[21:23])
@@ -332,12 +306,10 @@ def read_station_data(station_id: str,
                 p_src = line[37:45].strip()
                 np_src = line[46:54].strip()
                 
-                # Store date as YYYYMMDD
                 dates[sounding_idx] = year * 10000 + month * 100 + day
                 times[sounding_idx] = hour
                 numlevs[sounding_idx] = numlev
                 
-                # Ensure the entire string is assigned, not just the first character
                 if reltime != '':
                     reltimes.append(reltime)
                 else:
@@ -353,9 +325,7 @@ def read_station_data(station_id: str,
                     np_srcs.append('--')
                 
             else:
-                # Parse data line
                 try:
-                    # IGRA data format: columns are fixed width
                     lvltyp1_val = line[0:1]
                     lvltyp2_val = line[1:2]
                     etime_val = line[3:8].strip()
@@ -370,7 +340,6 @@ def read_station_data(station_id: str,
                     wdir_val = line[40:45].strip()
                     wspd_val = line[46:51].strip()
                     
-                    # Convert values to float if not empty, otherwise keep as NaN
                     if press_val and press_val != '-9999':
                         pressure[sounding_idx, level_idx] = float(press_val)/100
                     elif press_val:
@@ -397,7 +366,6 @@ def read_station_data(station_id: str,
                     elif wspd_val:
                         wspd[sounding_idx, level_idx] = float(wspd_val)
                     
-                    # Store level type and flags as numeric values if possible
                     if lvltyp1_val and lvltyp1_val.isdigit():
                         lvltyp1[sounding_idx, level_idx] = float(lvltyp1_val)
                         
@@ -408,7 +376,6 @@ def read_station_data(station_id: str,
                         etime[sounding_idx, level_idx] = float(etime_val)
                         
                     if pflag_val and pflag_val.isalnum():
-                        # Store as ASCII value if it's a character
                         pflag[sounding_idx, level_idx] = ord(pflag_val) if len(pflag_val) == 1 else np.nan
                         
                     if zflag_val and zflag_val.isalnum():
@@ -427,15 +394,12 @@ def read_station_data(station_id: str,
                 except (ValueError, IndexError) as e:
                     print(f"Error parsing line: {line}")
                     print(f"Error details: {e}")
-                    # Skip malformed lines
                     continue
 
 
         stations_df = read_station_locations(save_file=False)
 
-        # Create the NetCDF file
         if file_type.lower() in ['netcdf', 'nc']:
-            # Create a temporary file if not downloading
             if not download:
                 temp_file = tempfile.NamedTemporaryFile(suffix='.nc', delete=False)
                 output_file = temp_file.name
@@ -444,11 +408,9 @@ def read_station_data(station_id: str,
                 output_file = os.path.join(download_dir, f"{file_name}-main.nc" if main else f"{file_name}-full.nc")
 
             with nc.Dataset(output_file, 'w', format='NETCDF4') as ncfile:
-                # Create dimensions
                 ncfile.createDimension('num_profiles', sounding_count)
                 ncfile.createDimension('levels', max_levels)
                 
-                # Create variables
                 if main:
                     date_var = ncfile.createVariable('date', 'i4', ('num_profiles',))
                     time_var = ncfile.createVariable('time', 'i4', ('num_profiles',))
@@ -480,7 +442,6 @@ def read_station_data(station_id: str,
                     tflag_var = ncfile.createVariable('tflag', 'f4', ('num_profiles', 'levels'), fill_value=np.nan)
                     dpdp_var = ncfile.createVariable('dpdp', 'f4', ('num_profiles', 'levels'), fill_value=np.nan)
 
-                # Add attributes
                 date_var.units = 'YYYYMMDD'
                 date_var.long_name = 'Date of sounding'
                 
@@ -508,12 +469,10 @@ def read_station_data(station_id: str,
                 temperature_var.units = 'C'
                 temperature_var.long_name = 'Temperature'
                 
-                # Global attributes
                 ncfile.description = f'IGRA sounding data for station {station_id}'
                 ncfile.history = f'Created {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
                 ncfile.source = f'IGRA v2 data for {station_id}'
 
-                # Get station location information
                 try:
                     station_info = stations_df[stations_df['station_id'] == station_id].iloc[0]
                     ncfile.latitude = float(station_info['latitude'])
@@ -523,7 +482,6 @@ def read_station_data(station_id: str,
                 except Exception as e:
                     print(f"Warning: Could not retrieve station location information: {e}")
 
-                # Write data
                 if main:
                     date_var[:] = dates
                     time_var[:] = times
@@ -558,17 +516,14 @@ def read_station_data(station_id: str,
             print(f"Successfully created NetCDF file: {output_file}")
             ds = xr.open_dataset(output_file)
             
-            # Delete temporary file if not downloading
             if not download:
                 os.unlink(output_file)
                 
             return ds
         
         elif file_type.lower() in ['pandas', 'df']:
-            # Create a list to store all the data
             data = []
             
-            # Get station location information
             try:
                 station_info = stations_df[stations_df['station_id'] == station_id].iloc[0]
                 station_lat = float(station_info['latitude'])
@@ -578,16 +533,13 @@ def read_station_data(station_id: str,
                 station_lat = np.nan
                 station_lon = np.nan
             
-            # For each sounding
             for i in range(sounding_count):
-                # For each level in the sounding
                 for j in range(max_levels):
-                    # Skip if all values are NaN
                     if np.isnan(pressure[i, j]) and np.isnan(gph[i, j]) and np.isnan(temp[i, j]):
                         continue
                         
                     row = {
-                        'num_profiles': i,  # Add the profile number
+                        'num_profiles': i,
                         'date': dates[i],
                         'time': times[i],
                         'pressure': pressure[i, j],
@@ -613,10 +565,8 @@ def read_station_data(station_id: str,
                     
                     data.append(row)
             
-            # Create DataFrame
             df = pd.DataFrame(data)
             
-            # Save to CSV only if download=True
             if download:
                 df.to_csv(output_file, index=False)
                 print(f"Successfully saved DataFrame to: {output_file}")
@@ -662,13 +612,11 @@ def _load_nc(file_path: Union[str, Path], print_info: bool = True) -> xr.Dataset
     >>> temperature = ds['temperature'][42]
     >>> print(temperature.values)
     """
-    # Convert string path to Path object if necessary
     file_path = Path(file_path)
     
     if not file_path.exists():
         raise FileNotFoundError(f"NetCDF file not found: {file_path}")
     
-    # Open the NetCDF file using xarray
     ds = xr.open_dataset(file_path)
     
     if print_info:
@@ -731,13 +679,11 @@ def _load_df(file_path: Union[str, Path], print_info: bool = True) -> pd.DataFra
     >>> print(df.head())
     >>> print(df['column_name'].mean())
     """
-    # Convert string path to Path object if necessary
     file_path = Path(file_path)
     
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
     
-    # Determine file type and load accordingly
     suffix = file_path.suffix.lower()
     
     if suffix == '.csv':
@@ -805,7 +751,6 @@ def load_data(file_path: Union[str, Path], print_info: bool = True) -> Union[pd.
     >>> # Open a NetCDF file without printing information
     >>> ds = load_data("path/to/data.nc", print_info=False)
     """
-    # Convert string path to Path object if necessary
     file_path = Path(file_path)
 
     if file_path.suffix.lower() in ['.csv', '.xlsx', '.xls', '.parquet', '.json', '.pkl']:
@@ -845,20 +790,17 @@ def filter_by_date_range(df: Union[pd.DataFrame, xr.Dataset],
         
     try:
         if isinstance(df, pd.DataFrame):
-            # Filter the DataFrame
             filtered_df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
             if len(filtered_df) == 0:
                 print(f"Warning: No data found between {start_date} and {end_date}")
             return filtered_df
             
         elif isinstance(df, xr.Dataset):
-            # Find indices of dates within range
             date_mask = (df['date'].values >= start_date) & (df['date'].values <= end_date)
             if not np.any(date_mask):
                 print(f"Warning: No data found between {start_date} and {end_date}")
                 return None
                 
-            # Filter the Dataset using the mask
             filtered_ds = df.isel(num_profiles=date_mask)
             return filtered_ds
             
@@ -906,12 +848,10 @@ def filter_variables(df: pd.DataFrame,
         if not isinstance(df, pd.DataFrame):
             raise TypeError(f"Expected pandas DataFrame, got {type(df).__name__}")
             
-        # Always keep date, time, and num_profiles columns if they exist
         required_cols = ['num_profile', 'date', 'time']
         valid_vars = [var for var in variables if var in df.columns]
         cols_to_keep = required_cols + valid_vars
         
-        # Filter the DataFrame
         filtered_df = df[cols_to_keep].copy()
         
         return filtered_df
@@ -920,10 +860,8 @@ def filter_variables(df: pd.DataFrame,
         if not isinstance(df, xr.Dataset):
             raise TypeError(f"Expected xarray Dataset, got {type(df).__name__}")
             
-        # Always keep date and time variables if they exist
         required_vars = ['date', 'time']
         
-        # Handle height/gph synonym
         processed_vars = []
         for var in variables:
             if var == 'height':
@@ -935,7 +873,6 @@ def filter_variables(df: pd.DataFrame,
         valid_vars = [var for var in processed_vars if var in df.variables]
         vars_to_keep = required_vars + valid_vars
         
-        # Filter the Dataset
         filtered_ds = df[vars_to_keep]
         
         return filtered_ds
@@ -992,18 +929,13 @@ def read_station_locations(save_file: bool = True, start_year: int = 1900, end_y
     """
     
     try:
-        # Download the station list
-        # print("Downloading IGRA station list...")
         response = requests.get(metadata.IGRA_STATION_LIST_URL)
         response.raise_for_status()
         
-        # Parse the text content
         lines = response.text.splitlines()
         
-        # Skip header lines
         data_lines = [line for line in lines if line.strip() and not line.startswith('-')]
         
-        # Parse each line according to the fixed-width format
         stations = []
         for line in data_lines:
             try:
@@ -1025,16 +957,11 @@ def read_station_locations(save_file: bool = True, start_year: int = 1900, end_y
                 print(f"Error: {e}")
                 continue
         
-        # Create DataFrame
         df = pd.DataFrame(stations)
         
-        # Convert numeric columns to appropriate types
         numeric_cols = ['latitude', 'longitude', 'elevation', 'first_year', 'last_year', 'nobs']
         df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
         
-        # print(f"Successfully parsed {len(df)} stations")
-        
-        # Save to CSV if requested
         if save_file:
             output_file = 'igra_stations.csv'
             df.to_csv(output_file, index=False)
@@ -1125,7 +1052,6 @@ def plot_station_map(colour_by: str = 'none',
         )
         fig.update_traces(marker=dict(size=6, color='blue'))
     else:
-        # Set up color mapping based on colour_by parameter
         color_mapping = {
             'elevation': {
                 'data': stations_df['elevation'],
@@ -1152,10 +1078,8 @@ def plot_station_map(colour_by: str = 'none',
         if colour_by not in color_mapping:
             raise ValueError(f"colour_by must be one of {list(color_mapping.keys())}")
 
-        # Get the color mapping for the selected variable
         color_info = color_mapping[colour_by]
 
-        # Create the figure
         fig = px.scatter_geo(
             stations_df,
             lat='latitude',
@@ -1167,7 +1091,6 @@ def plot_station_map(colour_by: str = 'none',
             title='IGRA Station Locations'
         )
         
-        # Update marker appearance
         fig.update_traces(
             marker=dict(
                 size=6,
@@ -1176,7 +1099,6 @@ def plot_station_map(colour_by: str = 'none',
             )
         )
 
-    # Update layout to show the full global map
     fig.update_layout(
         geo=dict(
             showland=True,
@@ -1326,7 +1248,6 @@ def get_availability_json(station_id, download_dir=None, download_availability=F
             if download_dir is None:
                 download_dir = os.path.join(os.getcwd(), str(datetime.datetime.now().strftime("%Y-%m-%d")))
 
-            # Create the directory if it doesn't exist
             if not os.path.exists(download_dir):
                 os.makedirs(download_dir)
             availability_file = os.path.join(download_dir, f"{station_id}-availability.json")
@@ -1399,14 +1320,12 @@ def filter_stations(start_year: Optional[int] = None,
         
     stations_df = read_station_locations(save_file=False)
     
-    # Filter stations by year range if provided
     if start_year is not None or end_year is not None:
         if start_year is not None:
             stations_df = stations_df[stations_df['first_year'] >= start_year]
         if end_year is not None:
             stations_df = stations_df[stations_df['last_year'] <= end_year]
     
-    # Filter stations by latitude and longitude range if provided
     if lat_range is not None:
         stations_df = stations_df[
             (stations_df['latitude'] >= lat_range[0]) &
@@ -1423,7 +1342,7 @@ def filter_stations(start_year: Optional[int] = None,
     if has_date_range is not None:
         start_date = has_date_range[0]
         end_date = has_date_range[1]
-        for station_id in stations_list[:]:  # Create a copy of the list to safely modify during iteration
+        for station_id in stations_list[:]:
             if availability_dir is None:
                 availability_data = get_availability_json(station_id)
             else:
@@ -1431,10 +1350,8 @@ def filter_stations(start_year: Optional[int] = None,
                 with open(availability_file, 'r') as f:
                     availability_data = json.load(f)
                 
-            # Check if station has data in the specified date range
             has_data = False
             for year, month, day, hour in availability_data['raw_data']:
-                # Convert to datetime for easier comparison
                 current_date = year * 10000 + month * 100 + day
                 
                 if start_date <= current_date <= end_date:
@@ -1461,10 +1378,8 @@ def _filter_invalid_values(x: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np
     Tuple[np.ndarray, np.ndarray]
         Filtered x and y arrays with invalid values removed
     """
-    # Define invalid values
     invalid_values = [np.nan, -9999, -8888, 9999, 8888]
     
-    # Create mask for valid values
     mask = ~np.isnan(x) & ~np.isnan(y)
     for val in invalid_values:
         mask &= (x != val) & (y != val)
@@ -1526,14 +1441,12 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
     from scipy import interpolate
     import numpy as np
 
-    # Filter by date range if specified
     if start_date is not None or end_date is not None:
         if isinstance(data, pd.DataFrame):
             data = filter_by_date_range(data, start_date, end_date, file_type='df')
         else:
             data = filter_by_date_range(data, start_date, end_date, file_type='nc')
     
-    # Create uniform grid
     grid = np.arange(min_index, max_index + step_size, step_size)
             
     if isinstance(data, pd.DataFrame):
@@ -1543,37 +1456,28 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
         if index_variable not in data.columns:
             raise ValueError(f"Index variable '{index_variable}' not found in DataFrame")
             
-        # Create a copy to avoid modifying the original
         interpolated_data = data.copy()
         
-        # Group by profile number to interpolate within each profile
         grouped = interpolated_data.groupby('num_profiles')
         
-        # Create empty list to store interpolated profiles
         interpolated_profiles = []
         skipped_profiles = []
         
-        # Interpolate each profile onto the uniform grid
         for profile_num, profile in grouped:
-            # Get the original values
             x = profile[index_variable].values
             y = profile[variable].values
             
-            # Filter out invalid values
             x, y = _filter_invalid_values(x, y)
             
-            if len(x) > 1:  # Need at least 2 points for interpolation
-                # Sort the data points
+            if len(x) > 1:
                 sort_idx = np.argsort(x)
                 x = x[sort_idx]
                 y = y[sort_idx]
                 
                 try:
-                    # Create interpolation function
                     f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
                     interpolated_values = f(grid)
                     
-                    # Create a new DataFrame for this profile
                     profile_df = pd.DataFrame({
                         'num_profiles': profile_num,
                         'date': profile['date'].iloc[0],
@@ -1588,25 +1492,21 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
             else:
                 skipped_profiles.append((profile_num, profile['date'].iloc[0], profile['time'].iloc[0], "Insufficient valid data points"))
         
-        # Print information about skipped profiles
         if skipped_profiles:
             print("\nThe following profiles were skipped during interpolation:")
             for profile_num, date, time, reason in skipped_profiles:
                 print(f"Profile {profile_num} (Date: {date}, Time: {time}): {reason}")
             print()
         
-        # Combine all interpolated profiles
         if interpolated_profiles:
             return pd.concat(interpolated_profiles, ignore_index=True)
         else:
             return pd.DataFrame()
         
     elif isinstance(data, (xr.Dataset, nc.Dataset)):
-        # Convert netCDF4 Dataset to xarray Dataset if needed
         if isinstance(data, nc.Dataset):
             data = xr.Dataset.from_dict(data.variables)
             
-        # Handle height/gph synonym
         var_name = 'gph' if variable == 'height' else variable
         index_name = 'gph' if index_variable == 'height' else index_variable
         
@@ -1616,36 +1516,29 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
         if index_name not in data.variables:
             raise ValueError(f"Index variable '{index_variable}' not found in Dataset")
             
-        # Create a copy to avoid modifying the original
         interpolated_data = data.copy()
         
-        # Create new coordinate for the uniform grid
         new_coord = xr.DataArray(
             grid,
             dims=['levels'],
             coords={'levels': grid}
         )
         
-        # Create a new dataset with the interpolated values
         interpolated_values = []
         skipped_profiles = []
         
         for profile_idx in range(len(interpolated_data.num_profiles)):
-            # Get the original values for this profile
             x = interpolated_data[index_name].isel(num_profiles=profile_idx).values
             y = interpolated_data[var_name].isel(num_profiles=profile_idx).values
             
-            # Filter out invalid values
             x, y = _filter_invalid_values(x, y)
             
             if len(x) > 1:  # Need at least 2 points for interpolation
-                # Sort the data points
                 sort_idx = np.argsort(x)
                 x = x[sort_idx]
                 y = y[sort_idx]
                 
                 try:
-                    # Create interpolation function
                     f = interpolate.interp1d(x, y, kind=method, bounds_error=False, fill_value=fill_value, **kwargs)
                     interpolated_values.append(f(grid))
                 except ValueError as e:
@@ -1659,14 +1552,12 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
                 skipped_profiles.append((profile_idx, date, time, "Insufficient valid data points"))
                 interpolated_values.append(np.full_like(grid, np.nan))
         
-        # Print information about skipped profiles
         if skipped_profiles:
             print("\nThe following profiles were skipped during interpolation:")
             for profile_idx, date, time, reason in skipped_profiles:
                 print(f"Profile {profile_idx} (Date: {date}, Time: {time}): {reason}")
             print()
         
-        # Create new dataset with interpolated values
         new_data = xr.Dataset(
             {
                 var_name: xr.DataArray(
@@ -1688,7 +1579,6 @@ def interp_data(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset],
             }
         )
         
-        # Copy over date and time variables
         new_data['date'] = interpolated_data['date']
         new_data['time'] = interpolated_data['time']
         
@@ -1753,14 +1643,12 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
     >>> print(interpolated_ds['pressure'].values)  # Will show standard pressure levels
     [1000, 925, 850, 700, 500, 300, 250, 200, 150, 100, 70, 50, 30, 20, 10]
     """
-    # Filter by date range if specified
     if start_date is not None or end_date is not None:
         if isinstance(data, pd.DataFrame):
             data = filter_by_date_range(data, start_date, end_date, file_type='df')
         else:
             data = filter_by_date_range(data, start_date, end_date, file_type='nc')
     
-    # Create uniform grid
     grid = [1000, 925, 850, 700, 500, 300, 250, 200, 150, 100, 70, 50, 30, 20, 10]
     log_grid = np.log(grid)
             
@@ -1768,22 +1656,16 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
         if variable not in data.columns:
             raise ValueError(f"Variable '{variable}' not found in DataFrame")
             
-        # Create a copy to avoid modifying the original
         interpolated_data = data.copy()
         
-        # Group by profile number to interpolate within each profile
         grouped = interpolated_data.groupby('num_profiles')
         
-        # Create empty list to store interpolated profiles
         interpolated_profiles = []
         
-        # Interpolate each profile onto the uniform grid
         for profile_num, profile in grouped:
-            # Get the original values
             x = profile['pressure'].values
             y = profile[variable].values
             
-            # Filter out invalid values
             x, y = _filter_invalid_values(x, y)
             log_x = np.log(x)
             sort_idx = np.argsort(log_x)
@@ -1794,7 +1676,6 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
             if len(x) > 1:  # Need at least 2 points for interpolation
                 interpolated_values = np.interp(log_grid, log_x, y, left=fill_value, right=fill_value)
                 
-                # Create a new DataFrame for this profile
                 profile_df = pd.DataFrame({
                     'num_profiles': profile_num,
                     'date': profile['date'].iloc[0],
@@ -1805,54 +1686,44 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
                 
                 interpolated_profiles.append(profile_df)
         
-        # Combine all interpolated profiles
         if interpolated_profiles:
             return pd.concat(interpolated_profiles, ignore_index=True)
         else:
             return pd.DataFrame()
         
     elif isinstance(data, (xr.Dataset, nc.Dataset)):
-        # Convert netCDF4 Dataset to xarray Dataset if needed
         if isinstance(data, nc.Dataset):
             data = xr.Dataset.from_dict(data.variables)
             
-        # Handle height/gph synonym
         var_name = 'gph' if variable == 'height' else variable
         
         if var_name not in data.variables:
             raise ValueError(f"Variable '{variable}' not found in Dataset")
             
-        # Create a copy to avoid modifying the original
         interpolated_data = data.copy()
         
-        # Create new coordinate for the uniform grid
         new_coord = xr.DataArray(
             grid,
             dims=['levels'],
             coords={'levels': grid}
         )
         
-        # Create a new dataset with the interpolated values
         interpolated_values = []
         for profile_idx in range(len(interpolated_data.num_profiles)):
-            # Get the original values for this profile
             x = interpolated_data['pressure'].isel(num_profiles=profile_idx).values
             y = interpolated_data[var_name].isel(num_profiles=profile_idx).values
             
-            # Filter out invalid values
             x, y = _filter_invalid_values(x, y)
             log_x = np.log(x)
             sort_idx = np.argsort(log_x)
             log_x = log_x[sort_idx]
             y = y[sort_idx]
             
-            if len(x) > 1:  # Need at least 2 points for interpolation
-                # Interpolate onto the uniform grid
+            if len(x) > 1:
                 interpolated_values.append(np.interp(log_grid, log_x, y, left=fill_value, right=fill_value))
             else:
                 interpolated_values.append(np.full_like(log_grid, np.nan))
         
-        # Create new dataset with interpolated values
         new_data = xr.Dataset(
             {
                 var_name: xr.DataArray(
@@ -1874,7 +1745,6 @@ def interp_data_to_pressure_levels(data: Union[pd.DataFrame, xr.Dataset, nc.Data
             }
         )
         
-        # Copy over date and time variables
         new_data['date'] = interpolated_data['date']
         new_data['time'] = interpolated_data['time']
         
@@ -1920,13 +1790,10 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
         availability = []
         
         if isinstance(data, pd.DataFrame):
-            # Extract date and time information from DataFrame
             for _, row in data.groupby('num_profiles').first().iterrows():
-                # Handle float date values
                 date = int(float(row['date'])) if isinstance(row['date'], (str, float)) else int(row['date'])
                 time = int(float(row['time'])) if isinstance(row['time'], (str, float)) else int(row['time'])
                 
-                # Convert YYYYMMDD to year, month, day
                 year = date // 10000
                 month = (date % 10000) // 100
                 day = date % 100
@@ -1934,16 +1801,13 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
                 availability.append([year, month, day, time])
                 
         elif isinstance(data, (xr.Dataset, nc.Dataset)):
-            # Extract date and time information from Dataset
             dates = data['date'].values
             times = data['time'].values
             
             for date, time in zip(dates, times):
-                # Handle float date values
                 date = int(float(date)) if isinstance(date, (str, float)) else int(date)
                 time = int(float(time)) if isinstance(time, (str, float)) else int(time)
                 
-                # Convert YYYYMMDD to year, month, day
                 year = date // 10000
                 month = (date % 10000) // 100
                 day = date % 100
@@ -1953,29 +1817,22 @@ def get_availability(data: Union[pd.DataFrame, xr.Dataset]) -> Optional[Dict]:
         else:
             raise TypeError(f"Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
 
-        # Create nested dictionary structure
         nested_availability = {}
         
-        # Sort availability by year, month, day, time
         availability.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
         
         for year, month, day, time in availability:
-            # Initialize year if not exists
             if year not in nested_availability:
                 nested_availability[year] = {}
             
-            # Initialize month if not exists
             if month not in nested_availability[year]:
                 nested_availability[year][month] = {}
             
-            # Initialize day if not exists
             if day not in nested_availability[year][month]:
                 nested_availability[year][month][day] = []
             
-            # Add time if not already in the list
             if time not in nested_availability[year][month][day]:
                 nested_availability[year][month][day].append(time)
-                # Sort times
                 nested_availability[year][month][day].sort()
 
         return nested_availability
@@ -2017,7 +1874,12 @@ def get_num_soundings(data: Union[pd.DataFrame, xr.Dataset]) -> int:
     availability = get_availability(data)
     if availability is None:
         return 0
-    return len(availability)
+    total = 0
+    for year in availability:
+        for month in availability[year]:
+            for day in availability[year][month]:
+                total += len(availability[year][month][day])
+    return total
 
 def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
                 x_variable: str,
@@ -2035,7 +1897,6 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
     If date and time are not provided, the function will use the single unique date/time
     if it exists in the data. Otherwise, an error will be raised.
     """
-    # Define units for common variables
     units = {
         'temperature': '°C',
         'height': 'm',
@@ -2051,29 +1912,23 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         print("Error: No data provided")
         return None
         
-    # Check if this is a single profile (from get_profile)
     is_single_profile = False
     if isinstance(data, (xr.Dataset, nc.Dataset)):
         if 'num_profiles' in data.dims and data.dims['num_profiles'] == 1:
             is_single_profile = True
-            # Get date and time from the profile
             date = data['date'].values[0]
             time = data['time'].values[0]
 
-    # Get unique dates and times from data
     if isinstance(data, pd.DataFrame):
         unique_dates = data['date'].unique()
         unique_times = data['time'].unique()
-    else:  # xarray Dataset
-        # Get dates and times
+    else:
         dates = data['date'].values
         times = data['time'].values
         
-        # Get unique values using numpy
         unique_dates = np.unique(dates)
         unique_times = np.unique(times)
 
-    # If date/time not provided and not a single profile, check if there's a single unique combination
     if (date is None or time is None) and not is_single_profile:
         if len(unique_dates) == 1 and len(unique_times) == 1:
             date = unique_dates[0]
@@ -2082,7 +1937,6 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
             raise ValueError("Multiple dates/times found in data. Please specify date and time.")
 
     if isinstance(data, pd.DataFrame):
-        # First try exact match
         profile_data = data[
             (data['date'] == date) &
             (data['time'] == time)
@@ -2092,7 +1946,6 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
             print(f"No profile found for {date} {time}")
             return None
 
-        # Filter out invalid values (NaN, -9999, -8888)
         valid_mask = (
             ~profile_data[x_variable].isna() & 
             ~profile_data[y_variable].isna() &
@@ -2106,11 +1959,8 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
 
     elif isinstance(data, (xr.Dataset, nc.Dataset)):
         if is_single_profile:
-            # For single profiles from get_profile, use the data directly
             profile_data = data
         else:
-            # For full datasets, find the profile for the given date/time
-            # Find matching profile
             target_idx = np.where((data['date'].values == date) & 
                                 (data['time'].values == time))[0]
             
@@ -2120,19 +1970,15 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
                 
             profile_data = data.isel(num_profiles=target_idx[0])
         
-        # Handle height/gph synonym
         x_variable = 'gph' if x_variable == 'height' else x_variable
         y_variable = 'gph' if y_variable == 'height' else y_variable
         
-        # Get the data arrays
         x_array = profile_data[x_variable]
         y_array = profile_data[y_variable]
         
-        # Convert to numpy arrays for masking
         x_values = x_array.values.flatten()
         y_values = y_array.values.flatten()
         
-        # Create mask for valid values
         valid_mask = (
             ~np.isnan(x_values) & 
             ~np.isnan(y_values) &
@@ -2142,7 +1988,6 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
             (y_values != -8888)
         )
         
-        # Apply mask
         x_data = x_values[valid_mask]
         y_data = y_values[valid_mask]
 
@@ -2154,13 +1999,10 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
         print(f"Error: No valid data points found for {x_variable} vs {y_variable}")
         return None
 
-    # Create the plot
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot the profile
     ax.plot(x_data, y_data)
     
-    # Set labels and title with units
     if xlabel:
         ax.set_xlabel(xlabel)
     else:
@@ -2178,7 +2020,6 @@ def plot_profile(data: Union[pd.DataFrame, xr.Dataset],
     else:
         ax.set_title(f"{y_variable.capitalize()} vs {x_variable.capitalize()}\n{date} {time}")
         
-    # Invert y-axis if y_variable is pressure
     if y_variable == 'pressure':
         ax.invert_yaxis()
         
@@ -2214,15 +2055,12 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         return None
 
     if isinstance(data, pd.DataFrame):
-        # First try exact string match
         profile_data = data[
             (data['date'] == date) &
             (data['time'] == time)
         ]
         
-        # If no match found, try datetime comparison
         if len(profile_data) == 0:
-            # Since date and time are already datetime objects, compare directly
             profile_data = data[
                 (data['date'] == date) &
                 (data['time'] == time)
@@ -2235,20 +2073,16 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
         return profile_data
         
     elif isinstance(data, (xr.Dataset, nc.Dataset)):
-        # Convert netCDF4 Dataset to xarray Dataset if needed
         if isinstance(data, nc.Dataset):
             data = xr.Dataset.from_dict(data.variables)
             
-        # Validate that required variables exist
         if 'date' not in data.variables or 'time' not in data.variables:
             print("Error: Dataset must contain 'date' and 'time' variables")
             return None
             
-        # Get date and time values from data
         dates = data['date'].values
         times = data['time'].values
         
-        # Find matching profile
         target_idx = np.where((dates == date) & 
                             (times == time))[0]
         
@@ -2256,13 +2090,10 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
             print(f"No profile found for {date} {time}")
             return None
             
-        # Create new dataset with single profile
         new_data = xr.Dataset()
         
-        # Copy all variables, selecting only the matching profile
         for var_name in data.variables:
             if 'num_profiles' in data[var_name].dims:
-                # Create new variable with single profile
                 new_data[var_name] = xr.DataArray(
                     data[var_name].values[target_idx[0]:target_idx[0]+1],
                     dims=['num_profiles'] + [d for d in data[var_name].dims if d != 'num_profiles'],
@@ -2272,7 +2103,6 @@ def get_profile(data: Union[pd.DataFrame, xr.Dataset],
             else:
                 new_data[var_name] = data[var_name]
                 
-        # Copy all attributes
         new_data.attrs.update(data.attrs)
         
         return new_data
@@ -2357,40 +2187,29 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
     None
     """
     if isinstance(data, xr.Dataset):
-        # If already a Dataset, raise error
         raise ValueError("Data is already in netCDF format.")
     elif isinstance(data, pd.DataFrame):
-        # Convert DataFrame to Dataset
-        # First, identify datetime columns
         datetime_cols = []
         for col in data.columns:
             if pd.api.types.is_datetime64_any_dtype(data[col]):
                 datetime_cols.append(col)
         
-        # Create a copy of the DataFrame to avoid modifying the original
         df = data.copy()
         
-        # Convert datetime columns to appropriate format
         for col in datetime_cols:
             if col == 'date':
-                # Convert to YYYYMMDD integer format
                 df[col] = df[col].dt.strftime('%Y%m%d').astype(np.int32)
             elif col == 'time':
-                # Convert to hour integer format
                 df[col] = df[col].dt.hour.astype(np.int32)
         
-        # Group by date and time to get profiles
         profiles = df.groupby(['date', 'time'])
         
-        # Get number of profiles and max levels
         num_profiles = len(profiles)
         max_levels = profiles.size().max()
         
-        # Create arrays for each variable
         dates = np.zeros(num_profiles, dtype=np.int32)
         times = np.zeros(num_profiles, dtype=np.int32)
         
-        # Create arrays for the main variables
         pressure = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
         gph = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
         temp = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
@@ -2399,15 +2218,12 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
         wind_speed = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
         dewpoint = np.full((num_profiles, max_levels), np.nan, dtype=np.float32)
         
-        # Fill the arrays
         for i, ((date, time), profile) in enumerate(profiles):
             dates[i] = date
             times[i] = time
             
-            # Get the profile data
             profile_data = profile.reset_index(drop=True)
             
-            # Fill the arrays with profile data
             if 'pressure' in profile_data.columns:
                 pressure[i, :len(profile_data)] = profile_data['pressure'].values
             if 'gph' in profile_data.columns:
@@ -2425,7 +2241,6 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
             if 'dewpoint' in profile_data.columns:
                 dewpoint[i, :len(profile_data)] = profile_data['dewpoint'].values
         
-        # Create the Dataset
         ds = xr.Dataset(
             data_vars={
                 'date': (['num_profiles'], dates),
@@ -2444,7 +2259,6 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
             }
         )
         
-        # Add attributes
         ds.attrs['title'] = 'IGRA Data'
         ds.attrs['source'] = 'Converted from DataFrame'
         ds.attrs['creation_date'] = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
@@ -2452,7 +2266,6 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
         ds.attrs['longitude'] = df['longitude'].iloc[0]
 
         
-        # Add variable attributes
         ds.pressure.attrs['units'] = 'hPa'
         ds.gph.attrs['units'] = 'm'
         ds.temperature.attrs['units'] = '°C'
@@ -2461,7 +2274,6 @@ def convert_to_netcdf(data: Union[pd.DataFrame, xr.Dataset], name: str):
         ds.wind_speed.attrs['units'] = 'm/s'
         ds.dewpoint.attrs['units'] = '°C'
         
-        # Save to netCDF
         ds.to_netcdf(name)
     else:
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
@@ -2482,26 +2294,158 @@ def convert_to_df(data: Union[pd.DataFrame, xr.Dataset], name: str):
     None
     """
     if isinstance(data, pd.DataFrame):
-        # If already a DataFrame, raise error
         raise ValueError("Data is already in DataFrame format.")
     elif isinstance(data, xr.Dataset):
-        # Convert Dataset to DataFrame
         df = data.to_dataframe()
         
-        # Reset index to make all coordinates into columns
         df = df.reset_index()
         
-        # Drop the 'levels' column if it exists
         if 'levels' in df.columns:
             df = df.drop(columns=['levels'])
         
-        # Save to CSV
         df.to_csv(name, index=False)
     else:
         print(f"Error: Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
         return None
+    
+def compute_potential_temperature(data: Union[pd.DataFrame, xr.Dataset, nc.Dataset]) -> Union[pd.DataFrame, xr.Dataset]:
+    """Compute potential temperature for every observation in the data.
+    
+    Potential temperature is calculated using the formula:
+    θ = T * (1000/p)^(2/7)
+    where θ is potential temperature in Kelvin, T is temperature in Kelvin, and p is pressure in hPa.
+    
+    The function first converts temperature from Celsius to Kelvin, then applies the potential
+    temperature formula. Invalid values (NaN, -9999, -8888) are preserved as NaN in the output.
+    
+    Parameters
+    ----------
+    data : Union[pd.DataFrame, xr.Dataset, nc.Dataset]
+        Input data containing temperature and pressure information. Can be:
+        - pandas DataFrame with 'temperature' and 'pressure' columns
+        - xarray Dataset with 'temperature' and 'pressure' variables
+        - netCDF4 Dataset with 'temperature' and 'pressure' variables
+        
+    Returns
+    -------
+    Union[pd.DataFrame, xr.Dataset]
+        Data with the same structure as input plus a new 'potential_temperature' variable/column.
+        For DataFrames: adds 'potential_temperature' column
+        For Datasets: adds 'potential_temperature' variable with same dimensions as 'temperature'
+        
+    Examples
+    --------
+    >>> # Compute potential temperature for DataFrame
+    >>> df = read_station_data("USM00072520", file_type='df')
+    >>> df_with_theta = compute_potential_temperature(df)
+    >>> print(df_with_theta.columns)
+    ['num_profiles', 'date', 'time', 'pressure', 'height', 'temperature', 
+     'relative_humidity', 'wind_direction', 'wind_speed', 'dewpoint_depression',
+     'latitude', 'longitude', 'potential_temperature']
+    
+    >>> # Compute potential temperature for NetCDF Dataset
+    >>> ds = read_station_data("USM00072520", file_type='netcdf')
+    >>> ds_with_theta = compute_potential_temperature(ds)
+    >>> print(list(ds_with_theta.variables))
+    ['date', 'time', 'pressure', 'gph', 'temperature', 'rh', 'wdir', 'wspd', 
+     'dpdp', 'potential_temperature']
+    
+    >>> # Access potential temperature values
+    >>> theta_values = ds_with_theta['potential_temperature'].values
+    >>> print(f"Potential temperature range: {np.nanmin(theta_values):.1f} - {np.nanmax(theta_values):.1f} K")
+    """
+    
+    if data is None:
+        print("Error: No data provided")
+        return None
+        
+    try:
+        if isinstance(data, pd.DataFrame):
+            if 'temperature' not in data.columns:
+                raise ValueError("DataFrame must contain 'temperature' column")
+            if 'pressure' not in data.columns:
+                raise ValueError("DataFrame must contain 'pressure' column")
+                
+            result_data = data.copy()
+            
+            temp_celsius = result_data['temperature'].copy()
+            pressure_hpa = result_data['pressure'].copy()
+            
+            valid_mask = (
+                ~temp_celsius.isna() & 
+                ~pressure_hpa.isna() &
+                (temp_celsius != -9999) & 
+                (temp_celsius != -8888) &
+                (pressure_hpa != -9999) & 
+                (pressure_hpa != -8888) &
+                (pressure_hpa > 0)
+            )
+            
+            potential_temp = np.full(len(result_data), np.nan)
+            
+            temp_kelvin = temp_celsius[valid_mask] + 273.15
+            p_hpa = pressure_hpa[valid_mask]
+            
+            potential_temp[valid_mask] = temp_kelvin * (1000 / p_hpa) ** (2/7)
+            
+            result_data['potential_temperature'] = potential_temp
+            
+            return result_data
+            
+        elif isinstance(data, (xr.Dataset, nc.Dataset)):
+            if isinstance(data, nc.Dataset):
+                data = xr.Dataset.from_dict(data.variables)
+                
+            if 'temperature' not in data.variables:
+                raise ValueError("Dataset must contain 'temperature' variable")
+            if 'pressure' not in data.variables:
+                raise ValueError("Dataset must contain 'pressure' variable")
+                
+            result_data = data.copy()
+            
+            temp_celsius = result_data['temperature'].values
+            pressure_hpa = result_data['pressure'].values
+            
+            valid_mask = (
+                ~np.isnan(temp_celsius) & 
+                ~np.isnan(pressure_hpa) &
+                (temp_celsius != -9999) & 
+                (temp_celsius != -8888) &
+                (pressure_hpa != -9999) & 
+                (pressure_hpa != -8888) &
+                (pressure_hpa > 0)  # Pressure must be positive
+            )
+            
+            potential_temp = np.full_like(temp_celsius, np.nan)
+            
+            temp_kelvin = temp_celsius[valid_mask] + 273.15
+            p_hpa = pressure_hpa[valid_mask]
+            
+            potential_temp[valid_mask] = temp_kelvin * (1000 / p_hpa) ** (2/7)
+            
+            potential_temp_da = xr.DataArray(
+                potential_temp,
+                dims=result_data['temperature'].dims,
+                coords=result_data['temperature'].coords,
+                attrs={
+                    'units': 'K',
+                    'long_name': 'Potential temperature',
+                    'description': 'Potential temperature calculated as θ = T * (1000/p)^(2/7)'
+                }
+            )
+            
+            result_data['potential_temperature'] = potential_temp_da
+            
+            return result_data
+            
+        else:
+            raise TypeError(f"Expected pandas DataFrame or xarray Dataset, got {type(data).__name__}")
+            
+    except Exception as e:
+        print(f"Error computing potential temperature: {e}")
+        return None
+
 
 #### DATE FORMAT YYYYMMDD
 #### TIME FORMAT HH
-
 
